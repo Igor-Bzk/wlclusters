@@ -11,8 +11,13 @@
 import sys
 import os
 
-
-sys.path.insert(0, os.path.abspath('../wlclusters/'))
+# Ensure package root is importable for autodoc when building locally and on CI
+DOCS_DIR = os.path.dirname(__file__)
+REPO_ROOT = os.path.abspath(os.path.join(DOCS_DIR, '..', '..'))
+PKG_ROOT = os.path.join(REPO_ROOT, 'wlclusters')
+for path in [REPO_ROOT, PKG_ROOT]:
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 
 project = 'wlclusters'
@@ -40,5 +45,9 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'alabaster'
+try:
+    import furo  # noqa: F401
+    html_theme = 'furo'
+except Exception:
+    html_theme = 'alabaster'
 html_static_path = ['_static']

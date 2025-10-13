@@ -1,5 +1,5 @@
 README.md
-setup.py
+pyproject.toml
 wlclusters/__init__.py
 wlclusters/deproject.py
 wlclusters/fitting.py

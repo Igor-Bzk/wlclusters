@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wlclusters"
+version = "0.1.0"
+description = "A package to extract 1D shear profiles around galaxy cluster and fit them via density profile forward modeling"
+readme = "README.md"
+authors = [
+  { name = "Loris Chappuis" }
+]
+dependencies = [
+  "numpy",
+  "pymc",
+  "astropy",
+  "scipy",
+  "tqdm"
+]
+
+[tool.setuptools.packages.find]
+include = ["wlclusters*"]
+

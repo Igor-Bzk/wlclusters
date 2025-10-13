@@ -12,13 +12,21 @@ conda activate wlcl_env
 conda install -c conda-forge pymc
 
 
-3 - Install wlclusters:
+3 - Install wlclusters (pyproject-based):
 
 git clone https://github.com/LorisChappuis/wlclusters.git
 
 cd wlclusters
 
 pip install .
+
+Alternatively, build a wheel/sdist locally and install:
+
+pip install build
+
+python -m build
+
+pip install dist/*.whl
 
 
 4 - Adding the environment as a jupyter notebook kernel :
