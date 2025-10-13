@@ -51,3 +51,12 @@ try:
 except Exception:
     html_theme = 'alabaster'
 html_static_path = ['_static']
+
+# Mock heavy optional dependencies during autodoc to avoid import failures on CI
+autodoc_mock_imports = [
+    'pymc',
+    'numpy',
+    'scipy',
+    'astropy',
+    'tqdm',
+]
