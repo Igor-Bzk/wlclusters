@@ -4,6 +4,7 @@ import astropy.units as u
 import astropy.constants as c
 from tqdm import tqdm
 from astropy.coordinates import SkyCoord
+from warnings import warn
 
 from .lss import compute_shape_noise_error, get_lss_cov
 
@@ -242,15 +243,19 @@ def shear_extraction(
         clust_center = [cluster["RA"], cluster["Dec"]]
         clust_z = cluster["z_p"]
 
-        # Compute the tangential shear profile
-        bin_edges_deg, bin_mean, signal, errors = compute_tangential_shear_profile(
-            sources, clust_center, clust_z, bin_edges, sigma_g=sigma_g, dz=0.1, cosmo=cosmo, unit=unit
-        )
+        try:
+            # Compute the tangential shear profile
+            bin_edges_deg, bin_mean, signal, errors = compute_tangential_shear_profile(
+                sources, clust_center, clust_z, bin_edges, sigma_g=sigma_g, dz=0.1, cosmo=cosmo, unit=unit
+            )
 
-        # Compute the mean inverse critical density and fl
-        msci, fl = return_sigmacrit(
-            sources, clust_center, clust_z, bin_edges, dz=dz, cosmo=cosmo, unit=unit
-        )
+            # Compute the mean inverse critical density and fl
+            msci, fl = return_sigmacrit(
+                sources, clust_center, clust_z, bin_edges, dz=dz, cosmo=cosmo, unit=unit
+            )
+        except Exception as e:
+            warn(f"Error processing cluster ID {cluster['ID']}:\n{e}\nSkipping this cluster.")
+            continue
 
         # Store the shear profile in a table
         profile = Table()

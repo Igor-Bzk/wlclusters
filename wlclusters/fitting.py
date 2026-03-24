@@ -4,6 +4,7 @@ from astropy.table import Table
 from tqdm import tqdm
 from .modeling import WLData, WLmodel
 from .utils import *
+from warnings import warn
 
 
 def select_covariance(covtype, input_covmat, clust_id, clust_z, cluster_profiles):
@@ -271,9 +272,13 @@ def run(
     """
     all_c200_chains = []
     all_r200_chains = []
+    valid_cluster_ids = []
 
     for cluster in tqdm(cluster_cat):
         clust_id = cluster["ID"]
+        if clust_id not in shear_profiles["ID"]:
+            warn(f"Warning: Cluster ID {clust_id} not found in shear profiles. Skipping this cluster.")
+            continue
         clust_z = cluster["z_p"]
 
         mask = shear_profiles["ID"] == clust_id
@@ -304,14 +309,23 @@ def run(
         )
 
         # Call forward_model with all arguments
-        trace = forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delta=delta)
-
+        try:
+            trace = forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delta=delta)
+        except Exception as e:
+            warn(f"Error processing cluster ID {clust_id}:\n {e}\n Skipping this cluster.")
+            continue
+        
+        valid_cluster_ids.append(clust_id)
         all_c200_chains.append(np.array(trace.posterior[parnames[0]]).flatten())
         all_r200_chains.append(np.array(trace.posterior[parnames[1]]).flatten())
 
     all_chains = Table()
-    all_chains["ID"] = [cluster["ID"] for cluster in cluster_cat]
+    all_chains["ID"] = valid_cluster_ids
     all_chains[str(parnames[0])] = all_c200_chains
     all_chains[str(parnames[1])] = all_r200_chains
+    
+    if len(all_chains) == 0:
+        warn("No valid clusters were processed. Returning an empty table.")
+        return Table()  # Return an empty table if no valid clusters were processed
 
-    return all_chains, extract_results(cluster_cat, all_chains, unit, cosmo, parnames, delta)
+    return all_chains, extract_results(cluster_cat[np.isin(cluster_cat["ID"], valid_cluster_ids)], all_chains, unit, cosmo, parnames, delta)
