@@ -3,3 +3,4 @@ pymc
 astropy
 scipy
 tqdm
+healpy

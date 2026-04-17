@@ -9,6 +9,7 @@ Requires-Dist: pymc
 Requires-Dist: astropy
 Requires-Dist: scipy
 Requires-Dist: tqdm
+Requires-Dist: healpy
 
 INSTALLATION 
 
