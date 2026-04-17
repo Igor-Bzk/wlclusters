@@ -45,7 +45,10 @@ def pixelize_sources(sources, nside):
     all_gals = np.empty(ngal, dtype=dtype)
     
     for col in sources.colnames:
-        all_gals[col] = np.asarray(sources[col])[pixel_order]
+        if col in ["RA", "Dec"]:
+            all_gals[col] = np.asarray(np.radians(sources[col]))[pixel_order]
+        else:
+            all_gals[col] = np.asarray(sources[col])[pixel_order]
     
     return all_gals, offsets
 
@@ -62,7 +65,7 @@ def query_around_cluster(all_gals, offsets, center, nside, radius_rad):
     return neighbor_data
 
 def compute_tangential_shear_profile(
-    sources, center, z_cl, bin_edges, dz, cosmo, unit="proper", sigma_g=0.26
+    sources, center, z_cl, bin_edges_rad, dz, cosmo, unit="proper", sigma_g=0.26
 ):
     """
     Compute the tangential shear profile around a cluster center, accounting for responsivity (R) in each bin.
@@ -92,12 +95,9 @@ def compute_tangential_shear_profile(
     sources = sources[sources["z_p"] >= z_cl + dz]
     # x, y = sources["RA"] - center[0], sources["Dec"] - center[1]
     # theta = np.sqrt(x**2 + y**2)
-    center_rad = np.radians(center)
-    source_ra_rad = np.radians(sources["RA"])
-    source_dec_rad = np.radians(sources["Dec"])
-    theta = np.arccos(np.sin(source_dec_rad)*np.sin(center_rad[1]) + np.cos(source_dec_rad)*np.cos(center_rad[1]) *np.cos(source_ra_rad-center_rad[0]))
+    theta = np.arccos(np.sin(sources['Dec'])*np.sin(center[1]) + np.cos(sources['Dec'])*np.cos(center[1]) *np.cos(sources["RA"]-center[0]))
     # phi = np.arctan2(y, x)
-    phi = position_angle_fast(center_rad[1], center_rad[0], source_dec_rad, source_ra_rad)
+    phi = position_angle_fast(center[1], center[0], sources['Dec'], sources["RA"])
 
     # Initial raw ellipticity values
     e1 = sources["e_1"]
@@ -133,10 +133,7 @@ def compute_tangential_shear_profile(
     else:
         raise ValueError("Unit must be 'proper' or 'comoving'.")
 
-    nbins = len(bin_edges) - 1
-    bin_edges_deg = (bin_edges * 1000) / (kpcp * 60)
-    bin_mean = (bin_edges_deg[:-1] + bin_edges_deg[1:]) / 2
-    bin_edges_rad = np.radians(bin_edges_deg)
+    nbins = len(bin_edges_rad) - 1
     signal = np.zeros(nbins)
     errors = np.zeros(nbins)
 
@@ -171,11 +168,11 @@ def compute_tangential_shear_profile(
             signal[i] = 0
             errors[i] = 0
 
-    return bin_edges_deg, bin_mean, signal, errors
+    return signal, errors
 
 
 
-def return_sigmacrit(sources, center, z_cl, bin_edges, dz, cosmo, unit="proper"):
+def return_sigmacrit(sources, center, z_cl, bin_edges_rad, dz, cosmo, unit="proper"):
     """
     Compute the inverse mean critical density over the whole radial range around the cluster,
     taking into account weights.
@@ -199,19 +196,15 @@ def return_sigmacrit(sources, center, z_cl, bin_edges, dz, cosmo, unit="proper")
     else:
         raise ValueError("Unit must be 'proper' or 'comoving'.")
 
-    bin_edges_deg = (bin_edges * 1000) / (kpcp * 60)
 
-    binmin, binmax = np.radians((min(bin_edges_deg), max(bin_edges_deg)))
+    binmin, binmax = (min(bin_edges_rad), max(bin_edges_rad))
 
     sources_zcut = sources[sources["z_p"] >= z_cl + dz]
 
     # theta = np.sqrt(
     #     (sources_zcut["RA"] - center[0]) ** 2 + (sources_zcut["Dec"] - center[1]) ** 2
     # )
-    center_rad = np.radians(center)
-    source_ra_rad = np.radians(sources_zcut["RA"])
-    source_dec_rad = np.radians(sources_zcut["Dec"])
-    theta = np.arccos(np.sin(source_dec_rad)*np.sin(center_rad[1]) + np.cos(source_dec_rad)*np.cos(center_rad[1]) *np.cos(source_ra_rad-center_rad[0]))
+    theta = np.arccos(np.sin(sources_zcut["Dec"])*np.sin(center[1]) + np.cos(sources_zcut["Dec"])*np.cos(center[1]) *np.cos(sources_zcut["RA"]-center[0]))
     mask = np.logical_and(theta <= binmax, theta >= binmin)
 
     zs = sources_zcut["z_p"][mask]
@@ -301,26 +294,32 @@ def shear_extraction(
     print("Started pixelisation")
     pixelized_sources, offsets = pixelize_sources(sources, 512)
     print("Finished pixelisation")
-
+    
+    
     # Wrap the loop over clusters with tqdm
     for cluster in tqdm(cluster_cat, desc="Processing Clusters"):
         clust_center = [cluster["RA"], cluster["Dec"]]
+        clust_center_rad = np.radians(clust_center)
         clust_z = cluster["z_p"]
         if unit == "proper":
             kpcp = cosmo.kpc_proper_per_arcmin(clust_z).value
         elif unit == "comoving":
             kpcp = cosmo.kpc_comoving_per_arcmin(clust_z).value
-        cluster_sources = query_around_cluster(pixelized_sources, offsets, clust_center, 512, np.radians((bin_edges[-1] * 1000) / (kpcp * 60)))
+            
+        bin_edges_deg = (bin_edges * 1000) / (kpcp * 60)
+        bin_edges_rad = np.radians(bin_edges_deg)
+        bin_mean = (bin_edges_deg[:-1] + bin_edges_deg[1:]) / 2
+        cluster_sources = query_around_cluster(pixelized_sources, offsets, clust_center, 512, bin_edges_rad[-1])
 
         try:
             # Compute the tangential shear profile
-            bin_edges_deg, bin_mean, signal, errors = compute_tangential_shear_profile(
-                cluster_sources, clust_center, clust_z, bin_edges, sigma_g=sigma_g, dz=0.1, cosmo=cosmo, unit=unit
+            signal, errors = compute_tangential_shear_profile(
+                cluster_sources, clust_center_rad, clust_z, bin_edges_rad, sigma_g=sigma_g, dz=0.1, cosmo=cosmo, unit=unit
             )
 
             # Compute the mean inverse critical density and fl
             msci, fl = return_sigmacrit(
-                cluster_sources, clust_center, clust_z, bin_edges, dz=dz, cosmo=cosmo, unit=unit
+                cluster_sources, clust_center_rad, clust_z, bin_edges_rad, dz=dz, cosmo=cosmo, unit=unit
             )
         except Exception as e:
             warn(f"Error processing cluster ID {cluster['ID']}:\n{e}\nSkipping this cluster.")
