@@ -15,7 +15,8 @@ dependencies = [
   "pymc",
   "astropy",
   "scipy",
-  "tqdm"
+  "tqdm",
+  "healpy"
 ]
 
 [tool.setuptools.packages.find]
