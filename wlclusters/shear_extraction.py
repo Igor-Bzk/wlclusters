@@ -8,6 +8,26 @@ from warnings import warn
 
 from .lss import compute_shape_noise_error, get_lss_cov
 
+def position_angle_fast(dec_i, ra_i, dec_j, ra_j):
+    """
+    Gives the direction to go from (dec_i, ra_i) towards (dec_j, ra_j) on the sphere (measured from North).
+    Inputs are in longitude and latitude.
+
+    dec_i, ra_i : longitude and latitude of i [in rad] - float ou np.ndarray
+    dec_j, ra_j : longitude and latitude of j [in rad] - float ou np.ndarray
+    """
+
+    # Longitude difference
+    dra = ra_j - ra_i
+
+    # Position angle
+    num = np.sin(dra)
+    den = np.cos(dec_i) * np.tan(dec_j) - np.sin(dec_i) * np.cos(dra)
+    psi = np.arctan2(num, den)
+    
+    # Normalisation 0 and 2π to avoid lines of zero
+    psi = np.mod(psi, 2 * np.pi)
+    return psi
 
 
 def compute_tangential_shear_profile(
@@ -39,9 +59,14 @@ def compute_tangential_shear_profile(
 
     # Source selection based on redshift
     sources = sources[sources["z_p"] >= z_cl + dz]
-    x, y = sources["RA"] - center[0], sources["Dec"] - center[1]
-    theta = np.sqrt(x**2 + y**2)
-    phi = np.arctan2(y, x)
+    # x, y = sources["RA"] - center[0], sources["Dec"] - center[1]
+    # theta = np.sqrt(x**2 + y**2)
+    center_rad = np.radians(center)
+    source_ra_rad = np.radians(sources["RA"])
+    source_dec_rad = np.radians(sources["Dec"])
+    theta = np.arccos(np.sin(source_dec_rad)*np.sin(center_rad[1]) + np.cos(source_dec_rad)*np.cos(center_rad[1]) *np.cos(source_ra_rad-center_rad[0]))
+    # phi = np.arctan2(y, x)
+    phi = position_angle_fast(center_rad[1], center_rad[0], source_dec_rad, source_ra_rad)
 
     # Initial raw ellipticity values
     e1 = sources["e_1"]
@@ -80,12 +105,13 @@ def compute_tangential_shear_profile(
     nbins = len(bin_edges) - 1
     bin_edges_deg = (bin_edges * 1000) / (kpcp * 60)
     bin_mean = (bin_edges_deg[:-1] + bin_edges_deg[1:]) / 2
+    bin_edges_rad = np.radians(bin_edges_deg)
     signal = np.zeros(nbins)
     errors = np.zeros(nbins)
 
     # Loop through bins and compute shear, errors, and responsivity
     for i in range(nbins):
-        mask = np.logical_and(theta >= bin_edges_deg[i], theta < bin_edges_deg[i + 1])
+        mask = np.logical_and(theta >= bin_edges_rad[i], theta < bin_edges_rad[i + 1])
 
         if np.sum(mask) > 0:
             # Calculate responsivity R(Ri) for this bin
@@ -144,13 +170,17 @@ def return_sigmacrit(sources, center, z_cl, bin_edges, dz, cosmo, unit="proper")
 
     bin_edges_deg = (bin_edges * 1000) / (kpcp * 60)
 
-    binmin, binmax = min(bin_edges_deg), max(bin_edges_deg)
+    binmin, binmax = np.radians((min(bin_edges_deg), max(bin_edges_deg)))
 
     sources_zcut = sources[sources["z_p"] >= z_cl + dz]
 
-    theta = np.sqrt(
-        (sources_zcut["RA"] - center[0]) ** 2 + (sources_zcut["Dec"] - center[1]) ** 2
-    )
+    # theta = np.sqrt(
+    #     (sources_zcut["RA"] - center[0]) ** 2 + (sources_zcut["Dec"] - center[1]) ** 2
+    # )
+    center_rad = np.radians(center)
+    source_ra_rad = np.radians(sources_zcut["RA"])
+    source_dec_rad = np.radians(sources_zcut["Dec"])
+    theta = np.arccos(np.sin(source_dec_rad)*np.sin(center_rad[1]) + np.cos(source_dec_rad)*np.cos(center_rad[1]) *np.cos(source_ra_rad-center_rad[0]))
     mask = np.logical_and(theta <= binmax, theta >= binmin)
 
     zs = sources_zcut["z_p"][mask]
