@@ -5,6 +5,7 @@ import astropy.constants as c
 from tqdm import tqdm
 from astropy.coordinates import SkyCoord
 from warnings import warn
+import healpy as hp
 
 from .lss import compute_shape_noise_error, get_lss_cov
 
@@ -29,6 +30,36 @@ def position_angle_fast(dec_i, ra_i, dec_j, ra_j):
     psi = np.mod(psi, 2 * np.pi)
     return psi
 
+def pixelize_sources(sources, nside):
+    ra = sources["RA"]
+    dec = sources["Dec"]
+    ngal = np.shape(ra)[0]
+    npix = hp.nside2npix(nside)
+    pix_ind = hp.ang2pix(nside, ra, dec, nest=False, lonlat=True)
+    ngal_pix = np.bincount(pix_ind, minlength=npix)
+        
+    pixel_order = np.argsort(pix_ind)
+    offsets = np.r_[0, np.cumsum(ngal_pix), ngal]
+    
+    dtype = [(str(name), sources[name].dtype) for name in sources.colnames]
+    all_gals = np.empty(ngal, dtype=dtype)
+    
+    for col in sources.colnames:
+        all_gals[col] = np.asarray(sources[col])[pixel_order]
+    
+    return all_gals, offsets
+
+def query_around_cluster(all_gals, offsets, center, nside, radius_rad):
+    neighbors = hp.query_disc(nside, hp.ang2vec(center[0], center[1], lonlat=True), radius_rad + hp.nside2resol(nside))
+    neighbor_lenghts = offsets[neighbors+1] - offsets[neighbors]
+    neighbor_data = np.empty(sum(neighbor_lenghts), dtype=all_gals.dtype)
+    
+    pos = 0
+    for n in range(len(neighbors)):
+        neighbor_data[pos: pos + neighbor_lenghts[n]] = all_gals[offsets[neighbors[n]]: offsets[neighbors[n]+1]]
+        pos += neighbor_lenghts[n]
+
+    return neighbor_data
 
 def compute_tangential_shear_profile(
     sources, center, z_cl, bin_edges, dz, cosmo, unit="proper", sigma_g=0.26
@@ -54,7 +85,7 @@ def compute_tangential_shear_profile(
         errors (ndarray): Array of errors associated with each bin (including shape noise).
     """
 
-    if "z_p" not in sources.columns:
+    if "z_p" not in sources.dtype.names:
         raise ValueError("The 'z_p' column is missing in the sources DataFrame.")
 
     # Source selection based on redshift
@@ -73,10 +104,10 @@ def compute_tangential_shear_profile(
     e2 = -sources["e_2"]
 
     # Check for optional columns
-    use_response = "e_rms" in sources.columns
-    use_weights = "weight" in sources.columns
-    use_multiplicative_bias = "m_bias" in sources.columns
-    use_additive_bias = "c_1_bias" in sources.columns and "c_2_bias" in sources.columns
+    use_response = "e_rms" in sources.dtype.names
+    use_weights = "weight" in sources.dtype.names
+    use_multiplicative_bias = "m_bias" in sources.dtype.names
+    use_additive_bias = "c_1_bias" in sources.dtype.names and "c_2_bias" in sources.dtype.names
 
     if use_weights:
         w = sources["weight"]
@@ -186,7 +217,7 @@ def return_sigmacrit(sources, center, z_cl, bin_edges, dz, cosmo, unit="proper")
     zs = sources_zcut["z_p"][mask]
     w = (
         sources_zcut["weight"][mask]
-        if "weight" in sources_zcut.columns
+        if "weight" in sources_zcut.dtype.names
         else np.ones(len(zs))
     )
 
@@ -267,21 +298,29 @@ def shear_extraction(
     """
     profiles = []
     covariance_matrices = []
+    print("Started pixelisation")
+    pixelized_sources, offsets = pixelize_sources(sources, 512)
+    print("Finished pixelisation")
 
     # Wrap the loop over clusters with tqdm
     for cluster in tqdm(cluster_cat, desc="Processing Clusters"):
         clust_center = [cluster["RA"], cluster["Dec"]]
         clust_z = cluster["z_p"]
+        if unit == "proper":
+            kpcp = cosmo.kpc_proper_per_arcmin(clust_z).value
+        elif unit == "comoving":
+            kpcp = cosmo.kpc_comoving_per_arcmin(clust_z).value
+        cluster_sources = query_around_cluster(pixelized_sources, offsets, clust_center, 512, np.radians((bin_edges[-1] * 1000) / (kpcp * 60)))
 
         try:
             # Compute the tangential shear profile
             bin_edges_deg, bin_mean, signal, errors = compute_tangential_shear_profile(
-                sources, clust_center, clust_z, bin_edges, sigma_g=sigma_g, dz=0.1, cosmo=cosmo, unit=unit
+                cluster_sources, clust_center, clust_z, bin_edges, sigma_g=sigma_g, dz=0.1, cosmo=cosmo, unit=unit
             )
 
             # Compute the mean inverse critical density and fl
             msci, fl = return_sigmacrit(
-                sources, clust_center, clust_z, bin_edges, dz=dz, cosmo=cosmo, unit=unit
+                cluster_sources, clust_center, clust_z, bin_edges, dz=dz, cosmo=cosmo, unit=unit
             )
         except Exception as e:
             warn(f"Error processing cluster ID {cluster['ID']}:\n{e}\nSkipping this cluster.")

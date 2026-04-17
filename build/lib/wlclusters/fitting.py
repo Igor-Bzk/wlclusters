@@ -4,6 +4,7 @@ from astropy.table import Table
 from tqdm import tqdm
 from .modeling import WLData, WLmodel
 from .utils import *
+from warnings import warn
 
 
 def select_covariance(covtype, input_covmat, clust_id, clust_z, cluster_profiles):
@@ -107,7 +108,7 @@ def forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delt
     return trace
 
 
-def extract_results(cluster_cat, all_chains, unit, cosmo, parnames):
+def extract_results(cluster_cat, all_chains, unit, cosmo, parnames, delta):
     """
     Extracts the weak lensing modeling results, computing medians and percentiles for mass, radius, and concentration.
 
@@ -123,117 +124,119 @@ def extract_results(cluster_cat, all_chains, unit, cosmo, parnames):
     """
     z_p = cluster_cat["z_p"]
 
+    delta = str(int(delta))
+    
     if parnames == ["cdelt", "rdelt"]:
 
-        c200_med = np.median(all_chains["cdelt"], axis=1)
-        c200_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
-        c200_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
+        c_delta_med = np.median(all_chains["cdelt"], axis=1)
+        c_delta_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
+        c_delta_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
 
-        r200_med = np.median(all_chains["rdelt"], axis=1)
-        r200_perc_16 = np.percentile(all_chains["rdelt"], 16, axis=1)
-        r200_perc_84 = np.percentile(all_chains["rdelt"], 84, axis=1)
+        r_delta_med = np.median(all_chains["rdelt"], axis=1)
+        r_delta_perc_16 = np.percentile(all_chains["rdelt"], 16, axis=1)
+        r_delta_perc_84 = np.percentile(all_chains["rdelt"], 84, axis=1)
 
         if unit == "proper":
-            m200_med = rdelt_to_mdelt(r200_med, z_p, cosmo)
-            m200_perc_16 = rdelt_to_mdelt(r200_perc_16, z_p, cosmo)
-            m200_perc_84 = rdelt_to_mdelt(r200_perc_84, z_p, cosmo)
+            m_delta_med = rdelt_to_mdelt(r_delta_med, z_p, cosmo)
+            m_delta_perc_16 = rdelt_to_mdelt(r_delta_perc_16, z_p, cosmo)
+            m_delta_perc_84 = rdelt_to_mdelt(r_delta_perc_84, z_p, cosmo)
         elif unit == "comoving":
-            r200_proper_med = r200_med * (1 / (1 + z_p))
-            r200_proper_perc_16 = r200_perc_16 * (1 / (1 + z_p))
-            r200_proper_perc_84 = r200_perc_84 * (1 / (1 + z_p))
-            m200_med = rdelt_to_mdelt(r200_proper_med, z_p, cosmo)
-            m200_perc_16 = rdelt_to_mdelt(r200_proper_perc_16, z_p, cosmo)
-            m200_perc_84 = rdelt_to_mdelt(r200_proper_perc_84, z_p, cosmo)
+            r_delta_proper_med = r_delta_med * (1 / (1 + z_p))
+            r_delta_proper_perc_16 = r_delta_perc_16 * (1 / (1 + z_p))
+            r_delta_proper_perc_84 = r_delta_perc_84 * (1 / (1 + z_p))
+            m_delta_med = rdelt_to_mdelt(r_delta_proper_med, z_p, cosmo)
+            m_delta_perc_16 = rdelt_to_mdelt(r_delta_proper_perc_16, z_p, cosmo)
+            m_delta_perc_84 = rdelt_to_mdelt(r_delta_proper_perc_84, z_p, cosmo)
 
     elif parnames == ["cdelt", "mdelt"]:
 
-        c200_med = np.median(all_chains["cdelt"], axis=1)
-        c200_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
-        c200_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
+        c_delta_med = np.median(all_chains["cdelt"], axis=1)
+        c_delta_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
+        c_delta_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
 
-        m200_med = np.median(all_chains["mdelt"], axis=1)
-        m200_perc_16 = np.percentile(all_chains["mdelt"], 16, axis=1)
-        m200_perc_84 = np.percentile(all_chains["mdelt"], 84, axis=1)
+        m_delta_med = np.median(all_chains["mdelt"], axis=1)
+        m_delta_perc_16 = np.percentile(all_chains["mdelt"], 16, axis=1)
+        m_delta_perc_84 = np.percentile(all_chains["mdelt"], 84, axis=1)
 
         if unit == "proper":
-            r200_med = mdelt_to_rdelt(m200_med, z_p, cosmo)
-            r200_perc_16 = mdelt_to_rdelt(m200_perc_16, z_p, cosmo)
-            r200_perc_84 = mdelt_to_rdelt(m200_perc_84, z_p, cosmo)
+            r_delta_med = mdelt_to_rdelt(m_delta_med, z_p, cosmo)
+            r_delta_perc_16 = mdelt_to_rdelt(m_delta_perc_16, z_p, cosmo)
+            r_delta_perc_84 = mdelt_to_rdelt(m_delta_perc_84, z_p, cosmo)
         elif unit == "comoving":
-            m200_proper_med = m200_med * (1 / (1 + z_p))
-            m200_proper_perc_16 = m200_perc_16 * (1 / (1 + z_p))
-            m200_proper_perc_84 = m200_perc_84 * (1 / (1 + z_p))
-            r200_med = mdelt_to_rdelt(m200_proper_med, z_p, cosmo)
-            r200_perc_16 = mdelt_to_rdelt(m200_proper_perc_16, z_p, cosmo)
-            r200_perc_84 = mdelt_to_rdelt(m200_proper_perc_84, z_p, cosmo)
+            m_delta_proper_med = m_delta_med * (1 / (1 + z_p))
+            m_delta_proper_perc_16 = m_delta_perc_16 * (1 / (1 + z_p))
+            m_delta_proper_perc_84 = m_delta_perc_84 * (1 / (1 + z_p))
+            r_delta_med = mdelt_to_rdelt(m_delta_proper_med, z_p, cosmo)
+            r_delta_perc_16 = mdelt_to_rdelt(m_delta_proper_perc_16, z_p, cosmo)
+            r_delta_perc_84 = mdelt_to_rdelt(m_delta_proper_perc_84, z_p, cosmo)
 
     elif parnames == ["log10cdelt", "log10mdelt"]:
 
-        c200_med = np.median(10 ** all_chains["log10cdelt"], axis=1)
-        c200_perc_16 = np.percentile(10 ** all_chains["log10cdelt"], 16, axis=1)
-        c200_perc_84 = np.percentile(10 ** all_chains["log10cdelt"], 84, axis=1)
+        c_delta_med = np.median(10 ** all_chains["log10cdelt"], axis=1)
+        c_delta_perc_16 = np.percentile(10 ** all_chains["log10cdelt"], 16, axis=1)
+        c_delta_perc_84 = np.percentile(10 ** all_chains["log10cdelt"], 84, axis=1)
 
-        m200_med = np.median(10 ** all_chains["log10mdelt"], axis=1)
-        m200_perc_16 = np.percentile(10 ** all_chains["log10mdelt"], 16, axis=1)
-        m200_perc_84 = np.percentile(10 ** all_chains["log10mdelt"], 84, axis=1)
+        m_delta_med = np.median(10 ** all_chains["log10mdelt"], axis=1)
+        m_delta_perc_16 = np.percentile(10 ** all_chains["log10mdelt"], 16, axis=1)
+        m_delta_perc_84 = np.percentile(10 ** all_chains["log10mdelt"], 84, axis=1)
 
         if unit == "proper":
-            r200_med = mdelt_to_rdelt(m200_med, z_p, cosmo)
-            r200_perc_16 = mdelt_to_rdelt(m200_perc_16, z_p, cosmo)
-            r200_perc_84 = mdelt_to_rdelt(m200_perc_84, z_p, cosmo)
+            r_delta_med = mdelt_to_rdelt(m_delta_med, z_p, cosmo)
+            r_delta_perc_16 = mdelt_to_rdelt(m_delta_perc_16, z_p, cosmo)
+            r_delta_perc_84 = mdelt_to_rdelt(m_delta_perc_84, z_p, cosmo)
         elif unit == "comoving":
-            m200_proper_med = m200_med * (1 / (1 + z_p))
-            m200_proper_perc_16 = m200_perc_16 * (1 / (1 + z_p))
-            m200_proper_perc_84 = m200_perc_84 * (1 / (1 + z_p))
-            r200_med = mdelt_to_rdelt(m200_proper_med, z_p, cosmo)
-            r200_perc_16 = mdelt_to_rdelt(m200_proper_perc_16, z_p, cosmo)
-            r200_perc_84 = mdelt_to_rdelt(m200_proper_perc_84, z_p, cosmo)
+            m_delta_proper_med = m_delta_med * (1 / (1 + z_p))
+            m_delta_proper_perc_16 = m_delta_perc_16 * (1 / (1 + z_p))
+            m_delta_proper_perc_84 = m_delta_perc_84 * (1 / (1 + z_p))
+            r_delta_med = mdelt_to_rdelt(m_delta_proper_med, z_p, cosmo)
+            r_delta_perc_16 = mdelt_to_rdelt(m_delta_proper_perc_16, z_p, cosmo)
+            r_delta_perc_84 = mdelt_to_rdelt(m_delta_proper_perc_84, z_p, cosmo)
 
     elif parnames == ["cdelt", "log10mdelt"]:
 
-        c200_med = np.median(all_chains["cdelt"], axis=1)
-        c200_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
-        c200_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
+        c_delta_med = np.median(all_chains["cdelt"], axis=1)
+        c_delta_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
+        c_delta_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
 
-        m200_med = np.median(10 ** all_chains["log10mdelt"], axis=1)
-        m200_perc_16 = np.percentile(10 ** all_chains["log10mdelt"], 16, axis=1)
-        m200_perc_84 = np.percentile(10 ** all_chains["log10mdelt"], 84, axis=1)
+        m_delta_med = np.median(10 ** all_chains["log10mdelt"], axis=1)
+        m_delta_perc_16 = np.percentile(10 ** all_chains["log10mdelt"], 16, axis=1)
+        m_delta_perc_84 = np.percentile(10 ** all_chains["log10mdelt"], 84, axis=1)
 
         if unit == "proper":
-            r200_med = mdelt_to_rdelt(m200_med, z_p, cosmo)
-            r200_perc_16 = mdelt_to_rdelt(m200_perc_16, z_p, cosmo)
-            r200_perc_84 = mdelt_to_rdelt(m200_perc_84, z_p, cosmo)
+            r_delta_med = mdelt_to_rdelt(m_delta_med, z_p, cosmo)
+            r_delta_perc_16 = mdelt_to_rdelt(m_delta_perc_16, z_p, cosmo)
+            r_delta_perc_84 = mdelt_to_rdelt(m_delta_perc_84, z_p, cosmo)
         elif unit == "comoving":
-            m200_proper_med = m200_med * (1 / (1 + z_p))
-            m200_proper_perc_16 = m200_perc_16 * (1 / (1 + z_p))
-            m200_proper_perc_84 = m200_perc_84 * (1 / (1 + z_p))
-            r200_med = mdelt_to_rdelt(m200_proper_med, z_p, cosmo)
-            r200_perc_16 = mdelt_to_rdelt(m200_proper_perc_16, z_p, cosmo)
-            r200_perc_84 = mdelt_to_rdelt(m200_proper_perc_84, z_p, cosmo)
+            m_delta_proper_med = m_delta_med * (1 / (1 + z_p))
+            m_delta_proper_perc_16 = m_delta_perc_16 * (1 / (1 + z_p))
+            m_delta_proper_perc_84 = m_delta_perc_84 * (1 / (1 + z_p))
+            r_delta_med = mdelt_to_rdelt(m_delta_proper_med, z_p, cosmo)
+            r_delta_perc_16 = mdelt_to_rdelt(m_delta_proper_perc_16, z_p, cosmo)
+            r_delta_perc_84 = mdelt_to_rdelt(m_delta_proper_perc_84, z_p, cosmo)
 
     if unit == "proper":
-        m200_med = rdelt_to_mdelt(r200_med, z_p, cosmo)
-        m200_perc_16 = rdelt_to_mdelt(r200_perc_16, z_p, cosmo)
-        m200_perc_84 = rdelt_to_mdelt(r200_perc_84, z_p, cosmo)
+        m_delta_med = rdelt_to_mdelt(r_delta_med, z_p, cosmo)
+        m_delta_perc_16 = rdelt_to_mdelt(r_delta_perc_16, z_p, cosmo)
+        m_delta_perc_84 = rdelt_to_mdelt(r_delta_perc_84, z_p, cosmo)
     elif unit == "comoving":
-        r200_proper_med = r200_med * (1 / (1 + z_p))
-        r200_proper_perc_16 = r200_perc_16 * (1 / (1 + z_p))
-        r200_proper_perc_84 = r200_perc_84 * (1 / (1 + z_p))
-        m200_med = rdelt_to_mdelt(r200_proper_med, z_p, cosmo)
-        m200_perc_16 = rdelt_to_mdelt(r200_proper_perc_16, z_p, cosmo)
-        m200_perc_84 = rdelt_to_mdelt(r200_proper_perc_84, z_p, cosmo)
+        r_delta_proper_med = r_delta_med * (1 / (1 + z_p))
+        r_delta_proper_perc_16 = r_delta_perc_16 * (1 / (1 + z_p))
+        r_delta_proper_perc_84 = r_delta_perc_84 * (1 / (1 + z_p))
+        m_delta_med = rdelt_to_mdelt(r_delta_proper_med, z_p, cosmo)
+        m_delta_perc_16 = rdelt_to_mdelt(r_delta_proper_perc_16, z_p, cosmo)
+        m_delta_perc_84 = rdelt_to_mdelt(r_delta_proper_perc_84, z_p, cosmo)
 
     results_table = Table()
     results_table["ID"] = cluster_cat["ID"]
-    results_table["m200_med"] = m200_med
-    results_table["m200_perc_16"] = m200_perc_16
-    results_table["m200_perc_84"] = m200_perc_84
-    results_table["r200_med"] = r200_med
-    results_table["r200_perc_16"] = r200_perc_16
-    results_table["r200_perc_84"] = r200_perc_84
-    results_table["c200_med"] = c200_med
-    results_table["c200_perc_16"] = c200_perc_16
-    results_table["c200_perc_84"] = c200_perc_84
+    results_table[f"m{delta}_med"] = m_delta_med
+    results_table[f"m{delta}_perc_16"] = m_delta_perc_16
+    results_table[f"m{delta}_perc_84"] = m_delta_perc_84
+    results_table[f"r{delta}_med"] = r_delta_med
+    results_table[f"r{delta}_perc_16"] = r_delta_perc_16
+    results_table[f"r{delta}_perc_84"] = r_delta_perc_84
+    results_table[f"c{delta}_med"] = c_delta_med
+    results_table[f"c{delta}_perc_16"] = c_delta_perc_16
+    results_table[f"c{delta}_perc_84"] = c_delta_perc_84
 
     return results_table
 
@@ -269,9 +272,13 @@ def run(
     """
     all_c200_chains = []
     all_r200_chains = []
+    valid_cluster_ids = []
 
     for cluster in tqdm(cluster_cat):
         clust_id = cluster["ID"]
+        if clust_id not in shear_profiles["ID"]:
+            warn(f"Warning: Cluster ID {clust_id} not found in shear profiles. Skipping this cluster.")
+            continue
         clust_z = cluster["z_p"]
 
         mask = shear_profiles["ID"] == clust_id
@@ -302,14 +309,23 @@ def run(
         )
 
         # Call forward_model with all arguments
-        trace = forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delta=delta)
-
+        try:
+            trace = forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delta=delta)
+        except Exception as e:
+            warn(f"Error processing cluster ID {clust_id}:\n {e}\n Skipping this cluster.")
+            continue
+        
+        valid_cluster_ids.append(clust_id)
         all_c200_chains.append(np.array(trace.posterior[parnames[0]]).flatten())
         all_r200_chains.append(np.array(trace.posterior[parnames[1]]).flatten())
 
     all_chains = Table()
-    all_chains["ID"] = [cluster["ID"] for cluster in cluster_cat]
+    all_chains["ID"] = valid_cluster_ids
     all_chains[str(parnames[0])] = all_c200_chains
     all_chains[str(parnames[1])] = all_r200_chains
+    
+    if len(all_chains) == 0:
+        warn("No valid clusters were processed. Returning an empty table.")
+        return Table()  # Return an empty table if no valid clusters were processed
 
-    return all_chains, extract_results(cluster_cat, all_chains, unit, cosmo, parnames)
+    return all_chains, extract_results(cluster_cat[np.isin(cluster_cat["ID"], valid_cluster_ids)], all_chains, unit, cosmo, parnames, delta)
