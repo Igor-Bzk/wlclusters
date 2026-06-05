@@ -1,10 +1,10 @@
 import numpy as np
 import astropy.units as u
-from .deproject import MyDeprojVol
+from .deproject import deproj_vol
 import pymc as pm
 
 
-def rho_nfw_cr(radii, pmod, delta=200.0):
+def rho_nfw_cr(rmeans, pmod, delta=200.0):
     """
     Computes the Navarro-Frenk-White (NFW) density profile using PyMC (Theano) for a given radial distance array.
     Multiply the result by the critical density of the universe to get the physical density.
@@ -19,7 +19,7 @@ def rho_nfw_cr(radii, pmod, delta=200.0):
     """
 
     # Calculate r as the midpoints of radii
-    r = (radii[1:] + radii[:-1]) / 2 * 1000.0  # Convert radii to kpc
+    r = rmeans * 1000.0  # Convert radii to kpc
 
     cdelt, rdelt = pmod
 
@@ -67,8 +67,7 @@ def rho_to_sigma(radii_bins, rho):
         array: Projected surface mass density in units of M_sun * Mpc**-2.
     """
 
-    deproj = MyDeprojVol(radii_bins[:-1], radii_bins[1:])
-    proj_vol = deproj.deproj_vol().T
+    proj_vol = deproj_vol(radii_bins[:-1], radii_bins[1:])
     area_proj = np.pi * (-((radii_bins[:-1] * 1e6) ** 2) + (radii_bins[1:] * 1e6) ** 2)
     sigma = pm.math.dot(proj_vol, rho) / area_proj
     return sigma * 1e12
@@ -86,14 +85,13 @@ def rho_to_sigma_np(radii_bins, rho):
         array: Projected surface mass density in units of M_sun * Mpc**-2.
     """
 
-    deproj = MyDeprojVol(radii_bins[:-1], radii_bins[1:])
-    proj_vol = deproj.deproj_vol().T
+    proj_vol = deproj_vol(radii_bins[:-1], radii_bins[1:])
     area_proj = np.pi * (-((radii_bins[:-1] * 1e6) ** 2) + (radii_bins[1:] * 1e6) ** 2)
     sigma = np.dot(proj_vol, rho) / area_proj
     return sigma * 1e12
 
 
-def dsigma_trap(sigma, radii):
+def dsigma_trap(sigma, rmean):
     """
     Computes Delta Sigma, the differential surface mass density, using numerical trapezoidal integration.
 
@@ -105,23 +103,14 @@ def dsigma_trap(sigma, radii):
         array: Differential surface mass density (Delta Sigma).
     """
 
-    rmean = (radii[1:] + radii[:-1]) / 2
     rmean2 = (rmean[1:] + rmean[:-1]) / 2
-    m = np.tril(np.ones((len(rmean2) + 1, len(rmean2) + 1)))
     dr = rmean[1:] - rmean[:-1]
-
-    ndr = len(dr)
 
     arg0 = sigma[0] * (rmean2[0] ** 2) / 2
     arg1 = dr * (sigma[1:] * rmean[1:] + sigma[:-1] * rmean[:-1]) / 2
 
-    list_stack = [arg0]
-
-    for i in range(ndr):
-        list_stack.append(arg1[i])
-
-    arg = pm.math.stack(list_stack)
-    a = pm.math.dot(m, arg)
+    arg = pm.math.concatenate([[arg0], arg1])
+    a = pm.math.cumsum(arg)
     sigmabar = (2 / (rmean**2)) * a
     dsigma = sigmabar - sigma
     return dsigma
@@ -140,17 +129,13 @@ def dsigma_trap_np(sigma, radii):
     """
     rmean = (radii[1:] + radii[:-1]) / 2
     rmean2 = (rmean[1:] + rmean[:-1]) / 2
-    m = np.tril(np.ones((len(rmean2) + 1, len(rmean2) + 1)))
     dr = rmean[1:] - rmean[:-1]
-
-    ndr = len(dr)
 
     arg0 = sigma[0] * (rmean2[0] ** 2) / 2
     arg1 = dr * (sigma[1:] * rmean[1:] + sigma[:-1] * rmean[:-1]) / 2
 
     arg = np.append(arg0, arg1)
-
-    a = np.dot(m, arg)
+    a = np.cumsum(arg)
     sigmabar = (2 / (rmean**2)) * a
     dsigma = sigmabar - sigma
     return dsigma
@@ -195,13 +180,15 @@ def get_radplus(radii, rmin=1e-3, rmax=1e2, nptplus=19):
     if nptplus % 2 == 0:
         nptplus = nptplus + 1
     rmean = (radii[1:] + radii[:-1]) / 2.0
-    radplus = np.logspace(np.log10(rmin), np.log10(radii[0]), nptplus)
-    for i in range(len(radii) - 1):
-        vplus = np.linspace(radii[i], radii[i + 1], nptplus + 1)
-        radplus = np.append(radplus, vplus[1:])
-    radplus = np.append(
-        radplus, np.logspace(np.log10(radplus[-1]), np.log10(rmax), 20)[1:]
+
+    radstart = np.logspace(np.log10(rmin), np.log10(radii[0]), nptplus)
+    radmid = np.linspace(radii[:-1], radii[1:], nptplus + 1)[1:,]
+    radend = np.logspace(np.log10(radii[-1]), np.log10(rmax), 20)[1:]
+    
+    radplus = np.concatenate(
+        [radstart, np.ravel(radmid, order="F"), radend]
     )
+    
     rmeanplus = (radplus[1:] + radplus[:-1]) / 2.0
     nsym = int(np.floor(nptplus / 2))
     evalrad = (
@@ -239,11 +226,11 @@ def WLmodel(WLdata, pmod, delta=200.0):
 
     radplus, rm, ev = get_radplus(WLdata.radii_wl)
 
-    rho_out = rho_nfw_cr(radplus, pmod, delta) * WLdata.rho_crit
+    rho_out = rho_nfw_cr(rm, pmod, delta) * WLdata.rho_crit
 
     sig = rho_to_sigma(radplus, rho_out)
 
-    dsigma = dsigma_trap(sig, radplus)
+    dsigma = dsigma_trap(sig, rm)
 
     gplus = get_shear(sig, dsigma, WLdata.msigmacrit, WLdata.fl)
 
