@@ -22,8 +22,8 @@ def position_angle_fast(dec_i, ra_i, dec_j, ra_j):
     dra = ra_j - ra_i
 
     # Position angle
-    num = np.sin(dra)
-    den = np.cos(dec_i) * np.tan(dec_j) - np.sin(dec_i) * np.cos(dra)
+    num = np.cos(dec_i) * np.sin(dec_j) - np.sin(dec_i) * np.cos(dec_j) * np.cos(dra)
+    den = np.cos(dec_j) * np.sin(dra)
     psi = np.arctan2(num, den)
     
     # Normalisation 0 and 2π to avoid lines of zero
@@ -31,6 +31,18 @@ def position_angle_fast(dec_i, ra_i, dec_j, ra_j):
     return psi
 
 def pixelize_sources(sources, nside):
+    """
+    Bins the catalog into healpix pixels, while maintaing individual galaxy shear values in each bin.
+
+    Args:
+        sources (Dataframe): Source catalogue DataFrame containing columns for 'RA', 'Dec', 'e_1', 'e_2', and
+                            optionally the weights, multiplicative bias, additive biases, and RMS ellipticity (e_rms).
+        nside (int): Healpix nside of the binning.
+
+    Returns:
+        all_gals (ndarray): Structured array containing the source properties, sorted by pixel index.
+        offsets (ndarray): Array containing the cumulative count of galaxies in each pixel, used to access each individual pixel.
+    """
     ra = sources["RA"]
     dec = sources["Dec"]
     ngal = np.shape(ra)[0]
@@ -50,6 +62,19 @@ def pixelize_sources(sources, nside):
     return all_gals, offsets
 
 def query_around_cluster(all_gals, offsets, center, nside, radius_rad):
+    """
+    Query binned catalogs in the pixels around a cluster with a given center.
+
+    Args:
+        all_gals (recarray): Structured array containing the source properties, sorted by pixel index.
+        offsets (_type_): Array containing the cumulative count of galaxies in each pixel, used to access each individual pixel.
+        center (_type_): Position in longitude and latitude of the cluster center in degrees.
+        nside (_type_): Healpix nside of the binning.
+        radius_rad (_type_): Radius of the query around the cluster center in radians.
+
+    Returns:
+        neighbor_data (ndarray): Structured array containing the source properties of the galaxies within the query radius around the cluster center.
+    """
     neighbors = hp.query_disc(nside, hp.ang2vec(center[0], center[1], lonlat=True), radius_rad + hp.nside2resol(nside))
     neighbor_lenghts = offsets[neighbors+1] - offsets[neighbors]
     neighbor_data = np.empty(sum(neighbor_lenghts), dtype=all_gals.dtype)
@@ -62,7 +87,7 @@ def query_around_cluster(all_gals, offsets, center, nside, radius_rad):
     return neighbor_data
 
 def compute_tangential_shear_profile(
-    sources, center, z_cl, bin_edges, dz, cosmo, unit="proper", sigma_g=0.26
+    sources, center, theta, bin_edges_rad, sigma_g=0.26
 ):
     """
     Compute the tangential shear profile around a cluster center, accounting for responsivity (R) in each bin.
@@ -88,16 +113,7 @@ def compute_tangential_shear_profile(
     if "z_p" not in sources.dtype.names:
         raise ValueError("The 'z_p' column is missing in the sources DataFrame.")
 
-    # Source selection based on redshift
-    sources = sources[sources["z_p"] >= z_cl + dz]
-    # x, y = sources["RA"] - center[0], sources["Dec"] - center[1]
-    # theta = np.sqrt(x**2 + y**2)
-    center_rad = np.radians(center)
-    source_ra_rad = np.radians(sources["RA"])
-    source_dec_rad = np.radians(sources["Dec"])
-    theta = np.arccos(np.sin(source_dec_rad)*np.sin(center_rad[1]) + np.cos(source_dec_rad)*np.cos(center_rad[1]) *np.cos(source_ra_rad-center_rad[0]))
-    # phi = np.arctan2(y, x)
-    phi = position_angle_fast(center_rad[1], center_rad[0], source_dec_rad, source_ra_rad)
+    phi = position_angle_fast(center[1], center[0], sources['Dec'], sources["RA"])
 
     # Initial raw ellipticity values
     e1 = sources["e_1"]
@@ -175,7 +191,7 @@ def compute_tangential_shear_profile(
 
 
 
-def return_sigmacrit(sources, center, z_cl, bin_edges, dz, cosmo, unit="proper"):
+def return_sigmacrit(sources, z_cl, bin_edges_rad, cosmo, theta):
     """
     Compute the inverse mean critical density over the whole radial range around the cluster,
     taking into account weights.
@@ -192,32 +208,13 @@ def return_sigmacrit(sources, center, z_cl, bin_edges, dz, cosmo, unit="proper")
         fl (float): value of <sigcrit**-2> / (<sigcrit**-1>**2), useful for 2nd order approximation of the shear.
     """
 
-    if unit == "proper":
-        kpcp = cosmo.kpc_proper_per_arcmin(z_cl).value
-    elif unit == "comoving":
-        kpcp = cosmo.kpc_comoving_per_arcmin(z_cl).value
-    else:
-        raise ValueError("Unit must be 'proper' or 'comoving'.")
-
-    bin_edges_deg = (bin_edges * 1000) / (kpcp * 60)
-
-    binmin, binmax = np.radians((min(bin_edges_deg), max(bin_edges_deg)))
-
-    sources_zcut = sources[sources["z_p"] >= z_cl + dz]
-
-    # theta = np.sqrt(
-    #     (sources_zcut["RA"] - center[0]) ** 2 + (sources_zcut["Dec"] - center[1]) ** 2
-    # )
-    center_rad = np.radians(center)
-    source_ra_rad = np.radians(sources_zcut["RA"])
-    source_dec_rad = np.radians(sources_zcut["Dec"])
-    theta = np.arccos(np.sin(source_dec_rad)*np.sin(center_rad[1]) + np.cos(source_dec_rad)*np.cos(center_rad[1]) *np.cos(source_ra_rad-center_rad[0]))
+    binmin, binmax = (min(bin_edges_rad), max(bin_edges_rad))
     mask = np.logical_and(theta <= binmax, theta >= binmin)
 
-    zs = sources_zcut["z_p"][mask]
+    zs = sources["z_p"][mask]
     w = (
-        sources_zcut["weight"][mask]
-        if "weight" in sources_zcut.dtype.names
+        sources["weight"][mask]
+        if "weight" in sources.dtype.names
         else np.ones(len(zs))
     )
 
@@ -240,7 +237,6 @@ def return_sigmacrit(sources, center, z_cl, bin_edges, dz, cosmo, unit="proper")
     fl = fl_num / fl_dom
 
     return mean_sigm_crit_inv.value, fl.value
-
 
 def shear_extraction(
     cluster_cat,
@@ -305,22 +301,34 @@ def shear_extraction(
     # Wrap the loop over clusters with tqdm
     for cluster in tqdm(cluster_cat, desc="Processing Clusters"):
         clust_center = [cluster["RA"], cluster["Dec"]]
+        clust_center_rad = np.radians(clust_center)
         clust_z = cluster["z_p"]
         if unit == "proper":
             kpcp = cosmo.kpc_proper_per_arcmin(clust_z).value
         elif unit == "comoving":
             kpcp = cosmo.kpc_comoving_per_arcmin(clust_z).value
-        cluster_sources = query_around_cluster(pixelized_sources, offsets, clust_center, 512, np.radians((bin_edges[-1] * 1000) / (kpcp * 60)))
-
+            
+        bin_edges_deg = (bin_edges * 1000) / (kpcp * 60)
+        bin_edges_rad = np.radians(bin_edges_deg)
+        bin_mean = (bin_edges_deg[:-1] + bin_edges_deg[1:]) / 2
+        
+        cluster_sources = query_around_cluster(pixelized_sources, offsets, clust_center, 512, bin_edges_rad[-1])
+        cluster_sources = cluster_sources[cluster_sources["z_p"] >= clust_z + dz]
+        
+        theta = np.arccos(
+            np.sin(cluster_sources['Dec'])*np.sin(clust_center_rad[1]) + \
+                np.cos(cluster_sources['Dec'])*np.cos(clust_center_rad[1]) *np.cos(cluster_sources["RA"]-clust_center_rad[0])
+            )
+        
         try:
             # Compute the tangential shear profile
-            bin_edges_deg, bin_mean, signal, errors = compute_tangential_shear_profile(
-                cluster_sources, clust_center, clust_z, bin_edges, sigma_g=sigma_g, dz=0.1, cosmo=cosmo, unit=unit
+            signal, errors = compute_tangential_shear_profile(
+                cluster_sources, clust_center_rad, theta, bin_edges_rad, sigma_g=sigma_g
             )
 
             # Compute the mean inverse critical density and fl
             msci, fl = return_sigmacrit(
-                cluster_sources, clust_center, clust_z, bin_edges, dz=dz, cosmo=cosmo, unit=unit
+                cluster_sources, clust_z, bin_edges_rad, cosmo=cosmo, theta=theta
             )
         except Exception as e:
             warn(f"Error processing cluster ID {cluster['ID']}:\n{e}\nSkipping this cluster.")
