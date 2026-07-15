@@ -2,8 +2,8 @@ import pymc as pm
 import numpy as np
 from astropy.table import Table
 from tqdm import tqdm
-from .WlData import WLData
-from .WlModel_pymc import WlModel_pymc
+from .WlModel import WLData
+from .WlModel import WlModel_pymc
 from .utils import *
 from warnings import warn
 
@@ -34,43 +34,7 @@ def select_covariance(covtype, input_covmat, clust_id, clust_z, cluster_profiles
     else:
         return np.diag(np.square(cluster_profiles["errors"]))
 
-
-def setup_parameters(parnames, cosmo, clust_z, delta=200):
-    """
-    Sets up the parameters for the NFW profile model based on the chosen parameterization by converting the user choice into cdelt and rdelt.
-
-    Args:
-        parnames (list): List of parameter names to be used in the model (e.g. ['cdelt', 'rdelt'], ['cdelt', 'mdelt'], etc.).
-        cosmo (astropy.cosmology.Cosmology): The cosmology object to be used for calculations.
-        clust_z (float):The redshift of the current cluster.
-
-    Returns:
-        list: List of parameters for the model.
-    """
-    match parnames[0]:
-        case "cdelt":
-            cdelt = pm.Uniform(name="cdelt", lower=1.0, upper=10.0)
-        case "log10cdelt":
-            cdelt = pm.Uniform(name="log10cdelt", lower=0.0, upper=1.0)
-        case _:
-            raise ValueError("Invalid parnames specified.")
-
-    match parnames[1]:
-        case "rdelt":
-            rdelt = pm.Uniform(name="rdelt", lower=200.0, upper=4000.0)
-        case "mdelt":
-            mdelt = pm.Uniform(name="mdelt", lower=1e12, upper=1e16)
-            rdelt = pm.Deterministic("rdelt", mdelt_to_rdelt(mdelt, clust_z, cosmo, delta))
-        case "log10mdelt":
-            log10mdelt = pm.Uniform(name="log10mdelt", lower=12.0, upper=16.0)
-            mdelt = pm.Deterministic("mdelt", 10**log10mdelt)
-            rdelt = pm.Deterministic("rdelt", mdelt_to_rdelt(mdelt, clust_z, cosmo, delta))
-        case _:
-            raise ValueError("Invalid parnames specified.")
-    return [cdelt, rdelt]
-
-
-def forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delta=200):
+def forward_model(wldata, parnames, cov_mat, ndraws, ntune, delta=200):
     """
     Performs forward modeling of weak lensing data using a specified NFW profile and PyMC.
 
@@ -84,11 +48,10 @@ def forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delt
     Returns:
         trace : pymc5.backends.base.MultiTrace, the trace of the MCMC sampling process.
     """
+    # Initialize the weak lensing model
     wlmodel = WlModel_pymc(wldata, parnames, delta=delta)  # Initialize the model to set up necessary attributes
     
     with pm.Model() as model:
-        # Setup parameters inside the model context
-        # Build the weak lensing model
         gmodel, rm, ev = wlmodel.run()
         pm.MvNormal("WL", mu=gmodel[ev], observed=wldata.gplus, cov=cov_mat)
 
@@ -211,7 +174,7 @@ def run(
 
         # Call forward_model with all arguments
         try:
-            trace = forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delta=delta)
+            trace = forward_model(wldata, parnames, cov_mat, ndraws, ntune, delta=delta)
         except Exception as e:
             warn(f"Error processing cluster ID {clust_id}:\n {e}\n Skipping this cluster.")
             continue

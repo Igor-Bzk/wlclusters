@@ -1,6 +1,6 @@
 import numpy as np
-from .WlData import WLData
-from .WlModel_np import WlModel_np
+from .WlModel import WLData
+from .WlModel import WlModel_np
 from .utils import mdelt_to_rdelt
 
 def wldata_from_ID(
