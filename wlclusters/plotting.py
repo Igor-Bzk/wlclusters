@@ -1,9 +1,7 @@
 import numpy as np
-from tqdm import tqdm
-from .modeling import WLData, WLmodel_np
+from .WlData import WLData
+from .WlModel_np import WlModel_np
 from .utils import mdelt_to_rdelt
-import random
-
 
 def wldata_from_ID(
     lens_id,
@@ -68,9 +66,9 @@ def wldata_from_ID(
     """
 
     # Extract relevant data based the ID of the chosen cluster
-    results_id = results[np.isin(results["ID"], lens_id)]
-    shear_id = shear_profiles[np.isin(shear_profiles["ID"], lens_id)]
-    z_cl = cluster_cat[np.isin(cluster_cat["ID"], lens_id)]["z_p"]
+    results_id = results[results["ID"] == lens_id]
+    shear_id = shear_profiles[shear_profiles["ID"] == lens_id]
+    z_cl = cluster_cat[cluster_cat["ID"] == lens_id]["z_p"]
     rin = shear_id["rin"]
     rout = shear_id["rout"]
     gplus = shear_id["gplus"]
@@ -98,7 +96,8 @@ def wldata_from_ID(
 
             pmod_med = [results_id["c200_med"], results_id["r200_med"]]
             # Compute shear profile
-            gplus_med, rm, ev = WLmodel_np(wldata, pmod_med, delta=delta)
+            model = WlModel_np(wldata, delta=delta)
+            gplus_med, rm, ev = model.run(pmod_med)
             # Mask to cut the radial extrapolation
             mask = (rm >= min(wldata.rin_wl)) & (rm <= max(wldata.rout_wl))
             return wldata, gplus_med[mask], rm[mask]
@@ -119,15 +118,16 @@ def wldata_from_ID(
                 chains['rdelt'] = mdelt_to_rdelt(chains['mdelt'], z_cl, cosmo, delta=delta)
 
             # Sample 500 rows randomly from the chains for computational efficiency
-            sampled_indices = random.sample(range(len(chains['cdelt'][0])), 500)
+            sampled_indices = np.random.choice(np.arange(len(chains['cdelt'][0])), 500, replace=False)
             pmod = np.array(
                 (chains['cdelt'][0][sampled_indices], chains['rdelt'][0][sampled_indices])
             ).T
             gplus_results = []
 
             # Loop through the sampled chain rows to compute shear profile
-            for i in tqdm(range(len(sampled_indices))):
-                gplus, rm, ev = WLmodel_np(wldata, pmod[i], delta=delta)
+            model = WlModel_np(wldata, delta=delta)
+            for pmod_i in pmod:
+                gplus, rm, ev = model.run(pmod_i)
                 # Mask to cut the radial extrapolation
                 mask = (rm >= min(wldata.rin_wl)) & (rm <= max(wldata.rout_wl))
                 gplus_results.append(gplus[mask])

@@ -2,7 +2,8 @@ import pymc as pm
 import numpy as np
 from astropy.table import Table
 from tqdm import tqdm
-from .modeling import WLData, WLmodel
+from .WlData import WLData
+from .WlModel_pymc import WlModel_pymc
 from .utils import *
 from warnings import warn
 
@@ -83,13 +84,13 @@ def forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delt
     Returns:
         trace : pymc5.backends.base.MultiTrace, the trace of the MCMC sampling process.
     """
+    wlmodel = WlModel_pymc(wldata, parnames, delta=delta)  # Initialize the model to set up necessary attributes
+    
     with pm.Model() as model:
         # Setup parameters inside the model context
-        pmod = setup_parameters(parnames, cosmo, clust_z, delta)
-
         # Build the weak lensing model
-        gmodel, rm, ev = WLmodel(wldata, pmod, delta=delta)
-        g_obs = pm.MvNormal("WL", mu=gmodel[ev], observed=wldata.gplus, cov=cov_mat)
+        gmodel, rm, ev = wlmodel.run()
+        pm.MvNormal("WL", mu=gmodel[ev], observed=wldata.gplus, cov=cov_mat)
 
         # Sample the posterior
         trace = pm.sample(draws=ndraws, tune=ntune)

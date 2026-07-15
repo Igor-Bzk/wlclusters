@@ -1,5 +1,9 @@
 README.md
 pyproject.toml
+wlclusters/WlData.py
+wlclusters/WlModel.py
+wlclusters/WlModel_np.py
+wlclusters/WlModel_pymc.py
 wlclusters/__init__.py
 wlclusters/deproject.py
 wlclusters/fitting.py
