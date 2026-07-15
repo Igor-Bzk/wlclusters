@@ -1,6 +1,0 @@
-numpy
-pymc
-astropy
-scipy
-tqdm
-healpy
