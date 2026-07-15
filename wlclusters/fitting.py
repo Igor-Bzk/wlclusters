@@ -21,22 +21,15 @@ def select_covariance(covtype, input_covmat, clust_id, clust_z, cluster_profiles
     Returns:
         np.ndarray: The selected covariance matrix.
     """
-    if covtype == "lss_cov":
-        lss_cov = input_covmat
-        if "ID" in lss_cov.colnames:
-            return lss_cov["covariance_matrix"][np.isin(lss_cov["ID"], clust_id)][0]
-        elif "z" in lss_cov.colnames:
-            closest_z = find_closest_redshift(clust_z, lss_cov["z"])
-            return lss_cov[np.isin(lss_cov["z"], closest_z)]["covariance_matrix"][
-                0
-            ] + np.diag(np.square(cluster_profiles["errors"]))
-    elif covtype == "tot_cov":
-        tot_cov = input_covmat
-        if "ID" in tot_cov.colnames:
-            return tot_cov["covariance_matrix"][np.isin(tot_cov["ID"], clust_id)][0]
-        elif "z" in tot_cov.colnames:
-            closest_z = find_closest_redshift(clust_z, tot_cov["z"])
-            return tot_cov[np.isin(tot_cov["z"], closest_z)]["covariance_matrix"][0]
+    if covtype in {"lss_cov", "tot_cov"}:
+        if "ID" in input_covmat.colnames:
+            return input_covmat["covariance_matrix"][np.isin(input_covmat["ID"], clust_id)][0]
+        elif "z" in input_covmat.colnames:
+            closest_z = find_closest_redshift(clust_z, input_covmat["z"])
+            cov_mat = input_covmat[np.isin(input_covmat["z"], closest_z)]["covariance_matrix"][0]
+            if covtype == "lss_cov":
+                cov_mat += np.diag(np.square(cluster_profiles["errors"]))
+            return cov_mat
     else:
         return np.diag(np.square(cluster_profiles["errors"]))
 
@@ -53,31 +46,27 @@ def setup_parameters(parnames, cosmo, clust_z, delta=200):
     Returns:
         list: List of parameters for the model.
     """
-    if parnames == ["cdelt", "rdelt"]:
-        cdelt = pm.Uniform(name="cdelt", lower=1.0, upper=10.0)
-        rdelt = pm.Uniform(name="rdelt", lower=200.0, upper=4000.0)
-        pmod = [cdelt, rdelt]
-    elif parnames == ["cdelt", "mdelt"]:
-        cdelt = pm.Uniform(name="cdelt", lower=1.0, upper=10.0)
-        mdelt = pm.Uniform(name="mdelt", lower=1e12, upper=1e16)
-        rdelt = pm.Deterministic("rdelt", mdelt_to_rdelt(mdelt, clust_z, cosmo, delta))
-        pmod = [cdelt, rdelt]
-    elif parnames == ["log10cdelt", "log10mdelt"]:
-        log10cdelt = pm.Uniform(name="log10cdelt", lower=0.0, upper=1.0)
-        log10mdelt = pm.Uniform(name="log10mdelt", lower=12.0, upper=16.0)
-        cdelt = pm.Deterministic("cdelt", 10**log10cdelt)
-        mdelt = pm.Deterministic("mdelt", 10**log10mdelt)
-        rdelt = pm.Deterministic("rdelt", mdelt_to_rdelt(mdelt, clust_z, cosmo, delta))
-        pmod = [cdelt, rdelt]
-    elif parnames == ["cdelt", "log10mdelt"]:
-        cdelt = pm.Uniform(name="cdelt", lower=1.0, upper=10.0)
-        log10mdelt = pm.Uniform(name="log10mdelt", lower=12.0, upper=16.0)
-        mdelt = pm.Deterministic("mdelt", 10**log10mdelt)
-        rdelt = pm.Deterministic("rdelt", mdelt_to_rdelt(mdelt, clust_z, cosmo, delta))
-        pmod = [cdelt, rdelt]
-    else:
-        raise ValueError("Invalid parnames specified.")
-    return pmod
+    match parnames[0]:
+        case "cdelt":
+            cdelt = pm.Uniform(name="cdelt", lower=1.0, upper=10.0)
+        case "log10cdelt":
+            cdelt = pm.Uniform(name="log10cdelt", lower=0.0, upper=1.0)
+        case _:
+            raise ValueError("Invalid parnames specified.")
+
+    match parnames[1]:
+        case "rdelt":
+            rdelt = pm.Uniform(name="rdelt", lower=200.0, upper=4000.0)
+        case "mdelt":
+            mdelt = pm.Uniform(name="mdelt", lower=1e12, upper=1e16)
+            rdelt = pm.Deterministic("rdelt", mdelt_to_rdelt(mdelt, clust_z, cosmo, delta))
+        case "log10mdelt":
+            log10mdelt = pm.Uniform(name="log10mdelt", lower=12.0, upper=16.0)
+            mdelt = pm.Deterministic("mdelt", 10**log10mdelt)
+            rdelt = pm.Deterministic("rdelt", mdelt_to_rdelt(mdelt, clust_z, cosmo, delta))
+        case _:
+            raise ValueError("Invalid parnames specified.")
+    return [cdelt, rdelt]
 
 
 def forward_model(wldata, parnames, cosmo, clust_z, cov_mat, ndraws, ntune, delta=200):
@@ -123,120 +112,32 @@ def extract_results(cluster_cat, all_chains, unit, cosmo, parnames, delta):
         Table: Table containing the extracted results for each cluster (m200, r200, c200).
     """
     z_p = cluster_cat["z_p"]
-
     delta = str(int(delta))
-    
-    if parnames == ["cdelt", "rdelt"]:
+    def delta_stats(key):
+        arr = all_chains[key]
+        if key.startswith("log10"):
+            arr = 10 ** arr
+        return list(np.percentile(arr, [16, 50, 84], axis=1))
 
-        c_delta_med = np.median(all_chains["cdelt"], axis=1)
-        c_delta_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
-        c_delta_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
+    results_table = Table([cluster_cat["ID"]], names=["ID"])
 
-        r_delta_med = np.median(all_chains["rdelt"], axis=1)
-        r_delta_perc_16 = np.percentile(all_chains["rdelt"], 16, axis=1)
-        r_delta_perc_84 = np.percentile(all_chains["rdelt"], 84, axis=1)
+    results_table.add_columns((delta_stats(parnames[0])),
+        names=[f"c{delta}_perc_16", f"c{delta}_med", f"c{delta}_perc_84"])
 
-        if unit == "proper":
-            m_delta_med = rdelt_to_mdelt(r_delta_med, z_p, cosmo)
-            m_delta_perc_16 = rdelt_to_mdelt(r_delta_perc_16, z_p, cosmo)
-            m_delta_perc_84 = rdelt_to_mdelt(r_delta_perc_84, z_p, cosmo)
-        elif unit == "comoving":
-            r_delta_proper_med = r_delta_med * (1 / (1 + z_p))
-            r_delta_proper_perc_16 = r_delta_perc_16 * (1 / (1 + z_p))
-            r_delta_proper_perc_84 = r_delta_perc_84 * (1 / (1 + z_p))
-            m_delta_med = rdelt_to_mdelt(r_delta_proper_med, z_p, cosmo)
-            m_delta_perc_16 = rdelt_to_mdelt(r_delta_proper_perc_16, z_p, cosmo)
-            m_delta_perc_84 = rdelt_to_mdelt(r_delta_proper_perc_84, z_p, cosmo)
+    if "rdelt" in parnames[1]:
+        r_stats = delta_stats(parnames[1])
+        m_colnames = [f"m{delta}_perc_16", f"m{delta}_med", f"m{delta}_perc_84"]
+        
+        if unit != "proper":
+            r_stats /= (1 + z_p)
+        results_table.add_columns(rdelt_to_mdelt(r_stats, z_p, cosmo), names=m_colnames)
+    else:
+        m_stats = delta_stats(parnames[1])
+        r_colnames = [f"r{delta}_perc_16", f"r{delta}_med", f"r{delta}_perc_84"]
 
-    elif parnames == ["cdelt", "mdelt"]:
-
-        c_delta_med = np.median(all_chains["cdelt"], axis=1)
-        c_delta_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
-        c_delta_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
-
-        m_delta_med = np.median(all_chains["mdelt"], axis=1)
-        m_delta_perc_16 = np.percentile(all_chains["mdelt"], 16, axis=1)
-        m_delta_perc_84 = np.percentile(all_chains["mdelt"], 84, axis=1)
-
-        if unit == "proper":
-            r_delta_med = mdelt_to_rdelt(m_delta_med, z_p, cosmo)
-            r_delta_perc_16 = mdelt_to_rdelt(m_delta_perc_16, z_p, cosmo)
-            r_delta_perc_84 = mdelt_to_rdelt(m_delta_perc_84, z_p, cosmo)
-        elif unit == "comoving":
-            m_delta_proper_med = m_delta_med * (1 / (1 + z_p))
-            m_delta_proper_perc_16 = m_delta_perc_16 * (1 / (1 + z_p))
-            m_delta_proper_perc_84 = m_delta_perc_84 * (1 / (1 + z_p))
-            r_delta_med = mdelt_to_rdelt(m_delta_proper_med, z_p, cosmo)
-            r_delta_perc_16 = mdelt_to_rdelt(m_delta_proper_perc_16, z_p, cosmo)
-            r_delta_perc_84 = mdelt_to_rdelt(m_delta_proper_perc_84, z_p, cosmo)
-
-    elif parnames == ["log10cdelt", "log10mdelt"]:
-
-        c_delta_med = np.median(10 ** all_chains["log10cdelt"], axis=1)
-        c_delta_perc_16 = np.percentile(10 ** all_chains["log10cdelt"], 16, axis=1)
-        c_delta_perc_84 = np.percentile(10 ** all_chains["log10cdelt"], 84, axis=1)
-
-        m_delta_med = np.median(10 ** all_chains["log10mdelt"], axis=1)
-        m_delta_perc_16 = np.percentile(10 ** all_chains["log10mdelt"], 16, axis=1)
-        m_delta_perc_84 = np.percentile(10 ** all_chains["log10mdelt"], 84, axis=1)
-
-        if unit == "proper":
-            r_delta_med = mdelt_to_rdelt(m_delta_med, z_p, cosmo)
-            r_delta_perc_16 = mdelt_to_rdelt(m_delta_perc_16, z_p, cosmo)
-            r_delta_perc_84 = mdelt_to_rdelt(m_delta_perc_84, z_p, cosmo)
-        elif unit == "comoving":
-            m_delta_proper_med = m_delta_med * (1 / (1 + z_p))
-            m_delta_proper_perc_16 = m_delta_perc_16 * (1 / (1 + z_p))
-            m_delta_proper_perc_84 = m_delta_perc_84 * (1 / (1 + z_p))
-            r_delta_med = mdelt_to_rdelt(m_delta_proper_med, z_p, cosmo)
-            r_delta_perc_16 = mdelt_to_rdelt(m_delta_proper_perc_16, z_p, cosmo)
-            r_delta_perc_84 = mdelt_to_rdelt(m_delta_proper_perc_84, z_p, cosmo)
-
-    elif parnames == ["cdelt", "log10mdelt"]:
-
-        c_delta_med = np.median(all_chains["cdelt"], axis=1)
-        c_delta_perc_16 = np.percentile(all_chains["cdelt"], 16, axis=1)
-        c_delta_perc_84 = np.percentile(all_chains["cdelt"], 84, axis=1)
-
-        m_delta_med = np.median(10 ** all_chains["log10mdelt"], axis=1)
-        m_delta_perc_16 = np.percentile(10 ** all_chains["log10mdelt"], 16, axis=1)
-        m_delta_perc_84 = np.percentile(10 ** all_chains["log10mdelt"], 84, axis=1)
-
-        if unit == "proper":
-            r_delta_med = mdelt_to_rdelt(m_delta_med, z_p, cosmo)
-            r_delta_perc_16 = mdelt_to_rdelt(m_delta_perc_16, z_p, cosmo)
-            r_delta_perc_84 = mdelt_to_rdelt(m_delta_perc_84, z_p, cosmo)
-        elif unit == "comoving":
-            m_delta_proper_med = m_delta_med * (1 / (1 + z_p))
-            m_delta_proper_perc_16 = m_delta_perc_16 * (1 / (1 + z_p))
-            m_delta_proper_perc_84 = m_delta_perc_84 * (1 / (1 + z_p))
-            r_delta_med = mdelt_to_rdelt(m_delta_proper_med, z_p, cosmo)
-            r_delta_perc_16 = mdelt_to_rdelt(m_delta_proper_perc_16, z_p, cosmo)
-            r_delta_perc_84 = mdelt_to_rdelt(m_delta_proper_perc_84, z_p, cosmo)
-
-    if unit == "proper":
-        m_delta_med = rdelt_to_mdelt(r_delta_med, z_p, cosmo)
-        m_delta_perc_16 = rdelt_to_mdelt(r_delta_perc_16, z_p, cosmo)
-        m_delta_perc_84 = rdelt_to_mdelt(r_delta_perc_84, z_p, cosmo)
-    elif unit == "comoving":
-        r_delta_proper_med = r_delta_med * (1 / (1 + z_p))
-        r_delta_proper_perc_16 = r_delta_perc_16 * (1 / (1 + z_p))
-        r_delta_proper_perc_84 = r_delta_perc_84 * (1 / (1 + z_p))
-        m_delta_med = rdelt_to_mdelt(r_delta_proper_med, z_p, cosmo)
-        m_delta_perc_16 = rdelt_to_mdelt(r_delta_proper_perc_16, z_p, cosmo)
-        m_delta_perc_84 = rdelt_to_mdelt(r_delta_proper_perc_84, z_p, cosmo)
-
-    results_table = Table()
-    results_table["ID"] = cluster_cat["ID"]
-    results_table[f"m{delta}_med"] = m_delta_med
-    results_table[f"m{delta}_perc_16"] = m_delta_perc_16
-    results_table[f"m{delta}_perc_84"] = m_delta_perc_84
-    results_table[f"r{delta}_med"] = r_delta_med
-    results_table[f"r{delta}_perc_16"] = r_delta_perc_16
-    results_table[f"r{delta}_perc_84"] = r_delta_perc_84
-    results_table[f"c{delta}_med"] = c_delta_med
-    results_table[f"c{delta}_perc_16"] = c_delta_perc_16
-    results_table[f"c{delta}_perc_84"] = c_delta_perc_84
+        if unit != "proper":
+            m_stats /= (1 + z_p)
+        results_table.add_columns(mdelt_to_rdelt(m_stats, z_p, cosmo), names=r_colnames)
 
     return results_table
 
@@ -270,9 +171,8 @@ def run(
     Returns:
         Table: Table containing the posterior chains and the extracted results for each cluster.
     """
-    all_c200_chains = []
-    all_r200_chains = []
-    valid_cluster_ids = []
+    all_chains = Table(names=["ID", str(parnames[0]), str(parnames[1])],
+                       dtype=[int, (float, ndraws*2), (float, ndraws*2)])
 
     for cluster in tqdm(cluster_cat):
         clust_id = cluster["ID"]
@@ -315,17 +215,15 @@ def run(
             warn(f"Error processing cluster ID {clust_id}:\n {e}\n Skipping this cluster.")
             continue
         
-        valid_cluster_ids.append(clust_id)
-        all_c200_chains.append(np.array(trace.posterior[parnames[0]]).flatten())
-        all_r200_chains.append(np.array(trace.posterior[parnames[1]]).flatten())
+        c200_samples = trace.posterior[parnames[0]].values.flatten()
+        r200_samples = trace.posterior[parnames[1]].values.flatten()
+        
+        all_chains.add_row([clust_id, c200_samples, r200_samples])
 
-    all_chains = Table()
-    all_chains["ID"] = valid_cluster_ids
-    all_chains[str(parnames[0])] = all_c200_chains
-    all_chains[str(parnames[1])] = all_r200_chains
-    
     if len(all_chains) == 0:
         warn("No valid clusters were processed. Returning an empty table.")
         return Table()  # Return an empty table if no valid clusters were processed
 
-    return all_chains, extract_results(cluster_cat[np.isin(cluster_cat["ID"], valid_cluster_ids)], all_chains, unit, cosmo, parnames, delta)
+    cluster_cat = cluster_cat[np.isin(cluster_cat["ID"], all_chains["ID"])]
+
+    return all_chains, extract_results(cluster_cat, all_chains, unit, cosmo, parnames, delta)
