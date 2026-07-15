@@ -1,6 +1,4 @@
 import numpy as np
-from astropy.cosmology import Planck15 as cosmo
-import astropy.units as u
 
 def deproj_vol(radin, radot):
     """
@@ -50,25 +48,28 @@ def deproj_vol(radin, radot):
     nbin = len(ro)
     volconst = 4.0 / 3.0 * np.pi
     volmat = np.zeros((nbin, nbin))
+    
+    diag_idx = np.arange(nbin)
+    volmat[diag_idx, diag_idx] = (
+        volconst * ro**3 * (1.0 - (ri / ro) ** 2) ** 1.5
+    )
 
-    for iring in range(nbin-1, -1, -1):
-        volmat[iring, iring] = (
-            volconst
-            * ro[iring] ** 3
-            * (1.0 - (ri[iring] / ro[iring]) ** 2.0) ** 1.5
-        )
-        for ishell in range(nbin-1, iring, -1):
-            f1 = (1.0 - (ri[iring] / ro[ishell]) ** 2.0) ** 1.5 - (
-                1.0 - (ro[iring] / ro[ishell]) ** 2.0
-            ) ** 1.5
-            f2 = (1.0 - (ri[iring] / ri[ishell]) ** 2.0) ** 1.5 - (
-                1.0 - (ro[iring] / ri[ishell]) ** 2.0
-            ) ** 1.5
-            volmat[ishell, iring] = volconst * (
-                f1 * ro[ishell] ** 3 - f2 * ri[ishell] ** 3
-            )
+    ishell, iring = np.tril_indices(nbin, k=-1)
+    
+    ri_iring = ri[iring]
+    ro_iring = ro[iring]
+    ri_ishell = ri[ishell]
+    ro_ishell = ro[ishell]
+    
+    f1 = (1.0 - (ri_iring / ro_ishell) ** 2) ** 1.5 - \
+         (1.0 - (ro_iring / ro_ishell) ** 2) ** 1.5
 
-            if volmat[ishell, iring] < 0.0:
-                raise ValueError(f"The computed volume element at {(ishell, iring)} is negative: {volmat[ishell, iring]}. Check the input radii.")
+    f2 = (1.0 - (ri_iring / ri_ishell) ** 2) ** 1.5 - \
+         (1.0 - (ro_iring / ri_ishell) ** 2) ** 1.5
+         
+    vals = volconst * (f1 * ro_ishell**3 - f2 * ri_ishell**3)
+    if np.any(vals < 0.0):
+        raise ValueError("The computed volume elements contain negative values. Check the input radii.")
+    volmat[iring, ishell] = vals
 
-    return volmat.T
+    return volmat
