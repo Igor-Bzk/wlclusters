@@ -1,6 +1,4 @@
-from .deproject import *
-from .fitting import *
-from .modeling import *
-from .shear_extraction import *
+from .fitting import run
+from .shear_extraction import get_lss_cov_for_z, shear_extraction
 from .plotting import *
 from .lss import *
