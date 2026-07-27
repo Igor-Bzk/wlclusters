@@ -81,27 +81,27 @@ def extract_results(cluster_cat, all_chains, unit, cosmo, parnames, delta):
         arr = all_chains[key]
         if key.startswith("log10"):
             arr = 10 ** arr
-        return list(np.percentile(arr, [16, 50, 84], axis=1))
+        return np.percentile(arr, [50, 16, 84], axis=1)
 
     results_table = Table([cluster_cat["ID"]], names=["ID"])
 
-    results_table.add_columns((delta_stats(parnames[0])),
-        names=[f"c{delta}_perc_16", f"c{delta}_med", f"c{delta}_perc_84"])
+    colnames = {
+        letter : [f"{letter}{delta}_med", f"{letter}{delta}_perc_16", f"{letter}{delta}_perc_84"]
+        for letter in ["c", "r", "m"]
+    }
 
     if "rdelt" in parnames[1]:
         r_stats = delta_stats(parnames[1])
-        m_colnames = [f"m{delta}_perc_16", f"m{delta}_med", f"m{delta}_perc_84"]
-        
-        if unit != "proper":
-            r_stats /= (1 + z_p)
-        results_table.add_columns(rdelt_to_mdelt(r_stats, z_p, cosmo), names=m_colnames)
-    else:
+        m_stats = rdelt_to_mdelt(r_stats if unit == "proper" else r_stats / (1 + z_p), z_p, cosmo)
+    elif "mdelt" in parnames[1]:
         m_stats = delta_stats(parnames[1])
-        r_colnames = [f"r{delta}_perc_16", f"r{delta}_med", f"r{delta}_perc_84"]
+        r_stats = mdelt_to_rdelt(m_stats if unit == "proper" else m_stats / (1 + z_p), z_p, cosmo)
+    else:
+        raise ValueError("Invalid parnames specified.")
 
-        if unit != "proper":
-            m_stats /= (1 + z_p)
-        results_table.add_columns(mdelt_to_rdelt(m_stats, z_p, cosmo), names=r_colnames)
+    results_table.add_columns(m_stats, names=colnames["m"])
+    results_table.add_columns(r_stats, names=colnames["r"])
+    results_table.add_columns((delta_stats(parnames[0])), names=colnames["c"])
 
     return results_table
 
