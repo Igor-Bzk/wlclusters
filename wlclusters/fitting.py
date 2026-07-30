@@ -56,7 +56,7 @@ def forward_model(wldata, parnames, cov_mat, ndraws, ntune, delta=200):
         pm.MvNormal("WL", mu=gmodel[ev], observed=wldata.gplus, cov=cov_mat)
 
         # Sample the posterior
-        trace = pm.sample(draws=ndraws, tune=ntune)
+        trace = pm.sample(draws=ndraws, tune=ntune, chains=4)
 
     return trace
 
@@ -136,7 +136,7 @@ def run(
         Table: Table containing the posterior chains and the extracted results for each cluster.
     """
     all_chains = Table(names=["ID", str(parnames[0]), str(parnames[1])],
-                       dtype=[int, (float, ndraws*2), (float, ndraws*2)])
+                       dtype=[int, (float, ndraws*4), (float, ndraws*4)])
 
     for cluster in tqdm(cluster_cat):
         clust_id = cluster["ID"]
