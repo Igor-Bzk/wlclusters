@@ -61,41 +61,22 @@ class WLData:
     def __init__(
         self,
         redshift,
-        rin=None,
-        rout=None,
-        gplus=None,
-        err_gplus=None,
-        sigmacrit_inv=None,
-        fl=None,
+        rin,
+        rout,
+        gplus,
+        err_gplus,
+        sigmacrit_inv,
+        fl,
         cosmo=None,
         unit="proper",
         delta=200.0,
     ):
-
-        if rin is None or rout is None or gplus is None or err_gplus is None:
-
-            print("Missing input, please provide rin, rout, gplus, and err_gplus")
-
-            return
-
-        if sigmacrit_inv is None:
-
-            print("The mean value of sigma_crit is required")
-
-            return
-
-        if fl is None:
-
-            print(
-                "The second order correction factor is not given, we will do the calculation at first order"
-            )
 
         self.gplus = gplus
 
         self.err_gplus = err_gplus
 
         if cosmo is None:
-
             from astropy.cosmology import Planck15 as cosmo
 
         if unit == "proper":
@@ -171,7 +152,7 @@ class WlModel(ABC):
         self.delta = delta
         self.parnames = parnames
         
-        self.pi_delta_rhoc = (4 / 3) * np.pi * delta * WLdata.rho_crit
+        self.pi_delta_rhoc = (4 / 3) * np.pi * delta * self.rho_crit / 1e9  # M_sun/kpc^3 for conversions
         
         radplus, self.rmean, self.evalrad, self.rmean2, self.dr = WLdata.get_radplus()
         
@@ -243,7 +224,8 @@ class WlModel(ABC):
             case "cdelt":
                 cdelt = pm.Uniform(name="cdelt", lower=1.0, upper=10.0)
             case "log10cdelt":
-                cdelt = pm.Uniform(name="log10cdelt", lower=0.0, upper=1.0)
+                log10cdelt = pm.Uniform(name="log10cdelt", lower=0.0, upper=1.0)
+                cdelt = pm.Deterministic("cdelt", 10**log10cdelt)
             case _:
                 raise ValueError("Invalid parnames specified.")
         
