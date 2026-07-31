@@ -6,6 +6,7 @@ from .deproject import deproj_vol
 
 from abc import ABC, abstractmethod
 
+
 class WLData:
     """
     A class to represent the weak lensing data for a galaxy cluster.
@@ -96,7 +97,9 @@ class WLData:
 
         self.rref_wl = (self.rin_wl + self.rout_wl) / 2.0
 
-        self.rho_crit = (cosmo.critical_density(redshift).to(u.M_sun * u.Mpc**-3)).value
+        self.rho_crit = (
+            cosmo.critical_density(redshift).to(
+                u.M_sun * u.Mpc**-3)).value
 
         self.msigmacrit = sigmacrit_inv
 
@@ -105,62 +108,103 @@ class WLData:
         self.delta = delta
 
     def get_radplus(self, rmin=1e-3, rmax=1e2, nptplus=19):
-            """
-            Generates additional interpolated/extrapolated radii points for integration.
+        """
+        Generates additional interpolated/extrapolated radii points for integration.
 
-            Args:
-                radii (array): Input radii.
-                rmin (float, optional): Minimum radius value for extrapolation, defaults to 1e-3.
-                rmax (float, optional): Maximum radius value for extrapolation, defaults to 1e2.
-                nptplus (int, optional): Number of additional points, defaults to 19.
+        Args:
+            rmin (float, optional): Minimum radius value for extrapolation, defaults to 1e-3.
+            rmax (float, optional): Maximum radius value for extrapolation, defaults to 1e2.
+            nptplus (int, optional): Number of additional points, defaults to 19.
 
-            Returns:
-                tuple:
-                    - radplus (array): Extended radii array.
-                    - rmeanplus (array): Midpoint of extended radii.
-                    - evalrad (array): Indices of original radii within extended radii array.
-            """
+        Returns:
+            tuple:
+                - radplus (array): Extended radii array.
+                - rmeanplus (array): Midpoint of extended radii.
+                - evalrad (array): Indices of original radii within extended radii array.
+                - rmean2 (float): Midpoint of the rmeanplus midpoints.
+                - dr (array): Differences between consecutive rmeanplus values.
+        """
 
-            if nptplus % 2 == 0:
-                nptplus = nptplus + 1
-            rmean = (self.radii_wl[1:] + self.radii_wl[:-1]) / 2.0
+        if nptplus % 2 == 0:
+            nptplus = nptplus + 1
+        rmean = (self.radii_wl[1:] + self.radii_wl[:-1]) / 2.0
 
-            radstart = np.logspace(np.log10(rmin), np.log10(self.radii_wl[0]), nptplus)
-            radmid = np.linspace(self.radii_wl[:-1], self.radii_wl[1:], nptplus + 1)[1:,]
-            radend = np.logspace(np.log10(self.radii_wl[-1]), np.log10(rmax), 20)[1:]
-            
-            radplus = np.concatenate(
-                [radstart, np.ravel(radmid, order="F"), radend]
-            )
-            
-            rmeanplus = (radplus[1:] + radplus[:-1]) / 2.0
-            nsym = int(np.floor(nptplus / 2))
-            evalrad = (
-                np.arange(nptplus + nsym - 1, nptplus + nsym + len(rmean) * nptplus, nptplus)
-            )[: len(rmean)]
-            
-            rmean2 = (rmeanplus[1] + rmeanplus[0]) / 2
-            dr = rmeanplus[1:] - rmeanplus[:-1]
-            return radplus, rmeanplus, evalrad, rmean2, dr
+        radstart = np.logspace(
+            np.log10(rmin), np.log10(
+                self.radii_wl[0]), nptplus)
+        radmid = np.linspace(
+            self.radii_wl[:-1], self.radii_wl[1:], nptplus + 1)[1:,]
+        radend = np.logspace(
+            np.log10(self.radii_wl[-1]), np.log10(rmax), 20)[1:]
+
+        radplus = np.concatenate(
+            [radstart, np.ravel(radmid, order="F"), radend]
+        )
+
+        rmeanplus = (radplus[1:] + radplus[:-1]) / 2.0
+        nsym = int(np.floor(nptplus / 2))
+        evalrad = (
+            np.arange(
+                nptplus +
+                nsym -
+                1,
+                nptplus +
+                nsym +
+                len(rmean) *
+                nptplus,
+                nptplus))[
+            : len(rmean)]
+
+        rmean2 = (rmeanplus[1] + rmeanplus[0]) / 2
+        dr = rmeanplus[1:] - rmeanplus[:-1]
+        return radplus, rmeanplus, evalrad, rmean2, dr
 
 
 class WlModel(ABC):
-    def __init__(self, WLdata : WLData, parnames = ["cdelt", "mdelt"], delta=200.0):
+    """
+    A class to model the weak lensing shear profile based on a given density profile.
+    
+    Attributes:
+        rho_crit (float): Critical density of the universe at the redshift of the cluster.
+        msigmacrit (float): Mean inverse critical surface mass density.
+        fl (float): Second-order correction factor for weak lensing.
+        delta (float): Overdensity parameter for the model.
+        parnames (list): List of parameter names for the model.
+    """
+    def __init__(
+            self,
+            WLdata: WLData,
+            parnames=[
+                "cdelt",
+                "mdelt"],
+            delta=200.0):
+        """
+        Initializes the WlModel with weak lensing data and model parameters.
+
+        Args:
+            WLdata (WLData): An instance of the WLData class containing weak lensing data.
+            parnames (list, optional): List of parameter names for the model. Defaults to ["cdelt", "mdelt"].
+            delta (float, optional): Overdensity parameter for the model. Defaults to 200.0.
+        """
         self.rho_crit = WLdata.rho_crit
         self.msigmacrit = WLdata.msigmacrit
         self.fl = WLdata.fl
         self.delta = delta
         self.parnames = parnames
-        
-        self.pi_delta_rhoc = (4 / 3) * np.pi * delta * self.rho_crit / 1e9  # M_sun/kpc^3 for conversions
-        
+
+        self.pi_delta_rhoc = (4 / 3) * np.pi * delta * \
+            self.rho_crit / 1e9  # M_sun/kpc^3 for conversions
+
         radplus, self.rmean, self.evalrad, self.rmean2, self.dr = WLdata.get_radplus()
-        
+
         self.setup_projection(radplus)
 
     # ==================== SETUP SECTION ====================
-    
+
     def setup_projection(self, radplus):
+        """
+        Sets up the projection volumes and areas for the given radial bins.
+        """
         self.proj_vol = deproj_vol(radplus[:-1], radplus[1:])
         radbins_proj = (radplus * 1e6) ** 2
         self.area_proj = np.pi * (radbins_proj[1:] - radbins_proj[:-1])
@@ -171,33 +215,25 @@ class WlModel(ABC):
         """
         PyMC (Theano) model for predicting the mean tangential shear profile for a given density profile at a specified redshift.
 
-        Parameters
-        ----------
-        WLdata : WLData
-            Object containing all the necessary information about the cluster. This includes:
-            radii_wl : The radial bins for the weak lensing data.
-            rho_crit : The critical density at the cluster's redshift.
-            msigmacrit : Mean inverse critical surface mass density for the cluster.
-            fl : Second-order correction factor for weak lensing measurements.
-        pmod : list
-            List of parameters for the density profile model. For an NFW profile, this typically includes:
-            cdelta : Concentration parameter.
-            rdelta : Scale radius parameter.
+        Args:
+            pmod : list
+                List of parameters for the density profile model :
+                cdelta : Concentration parameter.
+                rdelta : Scale radius parameter.
 
-        Returns
-        -------
-        gplus : numpy.ndarray
-            Predicted mean tangential shear profile at the input radii.
-        rm : numpy.ndarray
-            Radii bins after applying interpolation or extrapolation through the function `get_radplus`.
-        ev : numpy.ndarray
-            Indices of the input data radii points within the new radii array, `rm`.
+        Returns:
+            gplus : numpy.ndarray
+                Predicted mean tangential shear profile at the input radii.
+            rm : numpy.ndarray
+                Radii bins after applying interpolation or extrapolation through the function `get_radplus`.
+            ev : numpy.ndarray
+                Indices of the input data radii points within the new radii array, `rm`.
         """
         if pmod is not None:
             cdelt, rdelt = pmod
         else:
             cdelt, rdelt = self.setup_parameters()
-        
+
         rho_out = self.rho_nfw_cr(cdelt, rdelt) * self.rho_crit
 
         sig = self.rho_to_sigma(rho_out)
@@ -212,13 +248,10 @@ class WlModel(ABC):
         """
         Sets up the parameters for the NFW profile model based on the chosen parameterization by converting the user choice into cdelt and rdelt.
 
-        Args:
-            parnames (list): List of parameter names to be used in the model (e.g. ['cdelt', 'rdelt'], ['cdelt', 'mdelt'], etc.).
-            cosmo (astropy.cosmology.Cosmology): The cosmology object to be used for calculations.
-            clust_z (float):The redshift of the current cluster.
-
         Returns:
-            list: List of parameters for the model.
+            cdelt, rdelt : tuple
+                cdelt : Concentration parameter.
+                rdelt : Scale radius parameter.
         """
         match self.parnames[0]:
             case "cdelt":
@@ -228,7 +261,7 @@ class WlModel(ABC):
                 cdelt = pm.Deterministic("cdelt", 10**log10cdelt)
             case _:
                 raise ValueError("Invalid parnames specified.")
-        
+
         match self.parnames[1]:
             case "rdelt":
                 rdelt = pm.Uniform(name="rdelt", lower=200.0, upper=4000.0)
@@ -241,17 +274,14 @@ class WlModel(ABC):
                 rdelt = pm.Deterministic("rdelt", self.mdelt_to_rdelt(mdelt))
             case _:
                 raise ValueError("Invalid parnames specified.")
-        return [cdelt, rdelt]
+        return cdelt, rdelt
 
     def rdelt_to_mdelt(self, r):
         """
-        Convert radius `r_delta` to mass `m_delta` for a given redshift and cosmology.
+        Convert radius `r_delta` to mass `m_delta` based on the model's critical density.
 
         Args:
             r (float): The radius `r_delta` in kpc.
-            z (float): The redshift of the cluster.
-            cosmo (astropy.cosmology.Cosmology): Cosmology object used for calculations (e.g., Planck15).
-            delta (float, optional): Overdensity factor (default is 200, corresponding to `r200`).
 
         Returns:
             float: The mass `m_delta` corresponding to the given radius `r_delta` at redshift `z` and overdensity `delta`.
@@ -260,13 +290,10 @@ class WlModel(ABC):
 
     def mdelt_to_rdelt(self, m):
         """
-        Convert mass `m_delta` to radius `r_delta` for a given redshift and cosmology.
+        Convert mass `m_delta` to radius `r_delta` based on the model's critical density.
 
         Args:
             m (float): The mass `m_delta` in solar masses.
-            z (float): The redshift of the cluster.
-            cosmo (astropy.cosmology.Cosmology): Cosmology object used for calculations (e.g., Planck15).
-            delta (float, optional): Overdensity factor (default is 200, corresponding to `m200`).
 
         Returns:
             float: The radius `r_delta` corresponding to the given mass `m_delta` at redshift `z` and overdensity `delta`.
@@ -275,13 +302,12 @@ class WlModel(ABC):
 
     def rho_nfw_cr(self, cdelt, rdelt):
         """
-        Computes the Navarro-Frenk-White (NFW) density profile using PyMC (Theano) for a given radial distance array.
+        Computes the Navarro-Frenk-White (NFW) density profile.
         Multiply the result by the critical density of the universe to get the physical density.
 
         Args:
-            radii (array): Radial distances in Mpc.
-            pmod (list): Parameters model, containing concentration and radius/mass.
-            delta (float, optional): Overdensity parameter, defaults to 200.
+            cdelt (float): Concentration parameter of the NFW profile.
+            rdelt (float): Scale radius parameter of the NFW profile.
 
         Returns:
             array: NFW density profile divided by the critical density of the universe.
@@ -302,10 +328,9 @@ class WlModel(ABC):
 
     def rho_to_sigma(self, rho):
         """
-        Projects a 3D density profile to compute the surface mass density using PyMC (Theano).
+        Projects the 3D density profile to compute the surface mass density.
 
         Args:
-            radii_bins (array): Binned radial distances.
             rho (array): 3D density profile values.
 
         Returns:
@@ -320,7 +345,6 @@ class WlModel(ABC):
 
         Args:
             sigma (array): Projected surface mass density values.
-            radii (array): Radial distances.
 
         Returns:
             array: Differential surface mass density (Delta Sigma).
@@ -343,60 +367,69 @@ class WlModel(ABC):
         Args:
             sigma (array): Projected surface mass density.
             dsigma (array): Differential surface mass density (Delta Sigma).
-            mean_sigm_crit_inv (float): Mean inverse critical surface mass density.
-            fl (float): Correction factor for second-order lensing effects.
 
         Returns:
             array: Mean tangential shear profile.
         """
 
-        shear = (dsigma * self.msigmacrit) / (1 - self.fl * sigma * self.msigmacrit)
+        shear = (dsigma * self.msigmacrit) / \
+            (1 - self.fl * sigma * self.msigmacrit)
 
         return shear
-    
+
     # ==================== ABSTRACT METHODS ====================
     # Used for easily switching between PyMC and Numpy
-    
+
     @abstractmethod
     def cumsum(self, array):
         pass
-    
+
     @abstractmethod
     def concatenate(self, arrays):
         pass
-    
+
     @abstractmethod
     def dot(self, a, b):
         pass
-    
+
     @abstractmethod
     def log(self, x):
         pass
 
 
 class WlModel_pymc(WlModel):
+    """
+    PyMC(Theano) implementation of the WlModel class.
+    This class overrides the abstract methods in WlModel to use PyMC's mathematical functions for computations.
+    """
+
     def dot(self, a, b):
         return pm.math.dot(a, b)
-    
+
     def log(self, x):
         return pm.math.log(x)
-    
+
     def cumsum(self, array):
         return pm.math.cumsum(array)
-    
+
     def concatenate(self, arrays):
         return pm.math.concatenate(arrays)
 
 
 class WlModel_np(WlModel):
+    """
+    Numpy implementation of the WlModel class.
+    This class overrides the abstract methods in WlModel to use Numpy's mathematical functions for computations.
+    """
+
     def dot(self, a, b):
         return np.dot(a, b)
-    
+
     def log(self, x):
         return np.log(x)
-    
+
     def cumsum(self, array):
         return np.cumsum(array)
-    
+
     def concatenate(self, arrays):
         return np.concatenate(arrays)

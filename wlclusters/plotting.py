@@ -1,7 +1,6 @@
 import numpy as np
 from .WlModel import WLData
 from .WlModel import WlModel_np
-from .utils import mdelt_to_rdelt
 
 def wldata_from_ID(
     lens_id,
@@ -103,6 +102,8 @@ def wldata_from_ID(
             return wldata, gplus_med[mask], rm[mask]
 
         elif return_shear_model == "envelope":
+            # Initialize the WlModel
+            model = WlModel_np(wldata, delta=delta)
 
             if all_chains is None:
                 print("Error: posterior chains are needed to compute the envelope.")
@@ -115,7 +116,7 @@ def wldata_from_ID(
                 chains["cdelt"] = 10 ** chains["log10cdelt"]
 
             if "mdelt" in chains.colnames:
-                chains['rdelt'] = mdelt_to_rdelt(chains['mdelt'], z_cl, cosmo, delta=delta)
+                chains['rdelt'] = model.mdelt_to_rdelt(chains['mdelt'])
 
             # Sample 500 rows randomly from the chains for computational efficiency
             sampled_indices = np.random.choice(np.arange(len(chains['cdelt'][0])), 500, replace=False)
@@ -125,7 +126,6 @@ def wldata_from_ID(
             gplus_results = []
 
             # Loop through the sampled chain rows to compute shear profile
-            model = WlModel_np(wldata, delta=delta)
             for pmod_i in pmod:
                 gplus, rm, ev = model.run(pmod_i)
                 # Mask to cut the radial extrapolation
